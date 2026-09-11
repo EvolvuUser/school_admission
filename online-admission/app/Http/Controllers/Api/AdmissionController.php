@@ -556,22 +556,16 @@ if (!$school) {
             'otp' => $otp,
         ]);
     }
-   public function getClasses()
+    public function getClasses()
 {
     $classes = DB::table('class')
-        ->join('new_admission_class', function ($join) {
-            $join->on('class.class_id', '=', 'new_admission_class.class_id')
-                ->on('class.academic_yr', '=', 'new_admission_class.academic_yr');
-        })
-        ->where('new_admission_class.publish', 'Y')
         ->select(
-            'class.class_id',
-            'class.name',
-            'class.name_numeric',
-            'class.academic_yr',
-            'new_admission_class.application_form_fee'
+            'class_id',
+            'name',
+            'name_numeric',
+            'academic_yr'
         )
-        ->orderBy('class.name')
+        ->orderBy('name')
         ->get();
 
     return response()->json([
