@@ -37,27 +37,43 @@ class AdmissionController extends Controller
     |--------------------------------------------------------------------------
     */
 
-    public function createRegistration(Request $request)
-    {
-        $validated = $request->validate([
-            'parent_name' => 'required|string|max:255',
-            'email' => 'required|email|max:255',
-            'phone_no' => 'required|string|max:20',
-        ]);
+   public function createRegistration(Request $request)
+{
+    $validated = $request->validate([
+        'parent_name' => 'required|string|max:100',
+        'email' => 'nullable|email|max:100',
+        'phone_no' => 'nullable|string|max:10',
+    ]);
 
-        $registration = Admission::create([
-            'parent_name' => $validated['parent_name'],
-            'email' => $validated['email'],
-            'phone_no' => $validated['phone_no'],
-            'date' => now()->toDateString(),
-        ]);
-
+    // At least email OR phone number is required
+    if (empty($validated['email']) && empty($validated['phone_no'])) {
         return response()->json([
-            'success' => true,
-            'message' => 'Registration created successfully',
-            'data' => $registration
-        ], 201);
+            'success' => false,
+            'message' => 'Please provide either email or phone number.'
+        ], 422);
     }
+
+    $registration = Admission::create([
+        'parent_name' => $validated['parent_name'],
+
+        // Existing DB design uses blank value instead of NULL
+        'email' => !empty($validated['email'])
+            ? $validated['email']
+            : ' ',
+
+        'phone_no' => !empty($validated['phone_no'])
+            ? $validated['phone_no']
+            : ' ',
+
+        'date' => now()->toDateString(),
+    ]);
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Registration created successfully',
+        'data' => $registration
+    ], 201);
+}
 
 
     /*
@@ -279,9 +295,6 @@ if (!$school) {
             'user_type' => 'new',
             'message' => 'OTP generated successfully.',
             'nar_id' => $registration->nar_id,
-
-            // Remove this later in production
-            'otp' => $otp,
         ]);
     }
 
@@ -551,9 +564,6 @@ if (!$school) {
             'success' => true,
             'message' => 'New OTP generated successfully.',
             'nar_id' => $registration->nar_id,
-
-            // Remove this later in production
-            'otp' => $otp,
         ]);
     }
    public function getClasses()

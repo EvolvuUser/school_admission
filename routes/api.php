@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\AdmissionFormController;
 use App\Http\Controllers\Api\AdmissionFormFieldOptionController;
 use App\Http\Controllers\Api\OnlineAdmissionFormController;
 use App\Http\Controllers\Api\AdmissionDocumentController;
+use App\Http\Controllers\Api\AdmissionPaymentController;
 
 
 
@@ -83,4 +84,8 @@ Route::get(
 Route::delete(
     '/admission/online-form/{formId}/documents/{docType}',
     [AdmissionDocumentController::class, 'destroy']
+);
+Route::post(
+    '/admission/payment/create',
+    [AdmissionPaymentController::class, 'createPayment']
 );
