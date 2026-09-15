@@ -84,6 +84,13 @@ class AdmissionController extends Controller
 
     public function sendOtp(Request $request)
     {
+        $request->merge([
+            'type' => $request->input('type')
+                ?: ($request->filled('email') ? 'email' : ($request->filled('phone_no') ? 'mobile' : null)),
+            'value' => $request->input('value')
+                ?: ($request->input('email') ?: $request->input('phone_no')),
+        ]);
+
         $validated = $request->validate([
             'type' => 'required|in:mobile,email',
             'value' => 'required|string',
@@ -307,6 +314,13 @@ if (!$school) {
 
     public function verifyOtp(Request $request)
     {
+        $request->merge([
+            'type' => $request->input('type')
+                ?: ($request->filled('email') ? 'email' : ($request->filled('phone_no') ? 'mobile' : null)),
+            'value' => $request->input('value')
+                ?: ($request->input('email') ?: $request->input('phone_no')),
+        ]);
+
         $validated = $request->validate([
             'type' => 'required|in:mobile,email',
             'value' => 'required|string',
@@ -390,6 +404,13 @@ if (!$school) {
 
     public function resendOtp(Request $request)
     {
+        $request->merge([
+            'type' => $request->input('type')
+                ?: ($request->filled('email') ? 'email' : ($request->filled('phone_no') ? 'mobile' : null)),
+            'value' => $request->input('value')
+                ?: ($request->input('email') ?: $request->input('phone_no')),
+        ]);
+
         $validated = $request->validate([
             'type' => 'required|in:mobile,email',
             'value' => 'required|string',
@@ -487,8 +508,8 @@ if (!$school) {
         if ($type === 'mobile') {
 
             $message = "Dear Parent,\n";
-            $message .= "Your new OTP for School Admission is: " . $otp . "\n";
-            $message .= "Please use this OTP to continue your admission process.\n";
+            $message .= "Your OTP for School Admission is: " . $otp . ".\n";
+            $message .= "Please check the school application for more details.\n";
             $message .= "– Evolvu";
 
             $result = app(WhatsAppService::class)->sendTextMessage(

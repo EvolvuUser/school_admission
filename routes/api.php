@@ -89,3 +89,7 @@ Route::post(
     '/admission/payment/create',
     [AdmissionPaymentController::class, 'createPayment']
 );
+Route::post(
+    '/admission/payment/callback',
+    [AdmissionPaymentController::class, 'paymentCallback']
+);
