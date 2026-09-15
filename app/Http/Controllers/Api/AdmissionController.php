@@ -95,15 +95,12 @@ class AdmissionController extends Controller
             'type' => 'required|in:mobile,email',
             'value' => 'required|string',
             'parent_name' => 'nullable|string|max:255',
-            'school_id' => 'required|integer',
         ]);
 
         $type = $validated['type'];
         $value = $validated['value'];
-        $schoolId = $validated['school_id'];
 
 $school = DB::table('school_settings')
-    ->where('school_id', $schoolId)
     ->where('is_active', 'Y')
     ->first();
 
@@ -414,15 +411,12 @@ if (!$school) {
         $validated = $request->validate([
             'type' => 'required|in:mobile,email',
             'value' => 'required|string',
-            'school_id' => 'required|integer',
         ]);
 
         $type = $validated['type'];
         $value = $validated['value'];
-        $schoolId = $validated['school_id'];
 
 $school = DB::table('school_settings')
-    ->where('school_id', $schoolId)
     ->where('is_active', 'Y')
     ->first();
 
