@@ -84,8 +84,7 @@ class WorldlineService
             . $mid;
 
         // Send encrypted request to Worldline.
-        $response = Http::withoutVerifying()
-    ->timeout(30)
+        $response = Http::timeout(30)
     ->withBody($encryptedData, 'text/plain')
     ->post($endpoint);
 

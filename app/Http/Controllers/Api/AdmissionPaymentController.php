@@ -158,6 +158,44 @@ class AdmissionPaymentController extends Controller
         ], 201);
     }
 
+    /**
+ * Get payment status by Order ID.
+ *
+ * GET:
+ * /api/admission/payment/{orderId}
+ */
+public function paymentStatus($orderId)
+{
+    $payment = OnlineAdmissionFee::where(
+        'OrderId',
+        $orderId
+    )->first();
+
+    if (!$payment) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Payment record not found.',
+        ], 404);
+    }
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Payment status fetched successfully.',
+        'data' => [
+            'payment_id' => $payment->adfees_payment_id,
+            'order_id' => $payment->OrderId,
+            'form_id' => $payment->form_id,
+            'amount' => $payment->amount,
+            'status' => $payment->status,
+            'status_description' => $payment->Status_desc,
+            'transaction_reference' => $payment->Trnx_ref_no,
+            'rrn' => $payment->rrn,
+            'payment_date' => $payment->payment_date,
+            'academic_yr' => $payment->academic_yr,
+        ],
+    ]);
+}
+
 
     /**
      * Handle Worldline payment callback.
