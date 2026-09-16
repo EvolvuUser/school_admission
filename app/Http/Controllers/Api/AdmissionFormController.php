@@ -190,6 +190,24 @@ class AdmissionFormController extends Controller
             'other_area' => 'nullable|string|max:50',
         ]);
 
+        $genderCodes = [
+            'male' => 'M',
+            'female' => 'F',
+            'other' => 'O',
+        ];
+
+        $siblingCodes = [
+            'yes' => 'Y',
+            'no' => 'N',
+        ];
+
+        $gender = strtolower(trim($validated['gender']));
+        $sibling = strtolower(trim($validated['sibling'] ?? ''));
+
+        $validated['gender'] = $genderCodes[$gender] ?? strtoupper(substr($gender, 0, 1));
+        $validated['sibling'] = $siblingCodes[$sibling]
+            ?? ($sibling !== '' ? strtoupper(substr($sibling, 0, 1)) : 'N');
+
 
         try {
 
@@ -451,12 +469,12 @@ class AdmissionFormController extends Controller
                 'mid_name' =>
                     isset($validated['mid_name'])
                         ? strtoupper(trim($validated['mid_name']))
-                        : null,
+                        : '',
 
                 'last_name' =>
                     isset($validated['last_name'])
                         ? strtoupper(trim($validated['last_name']))
-                        : null,
+                        : '',
 
                 'dob' => $validated['dob'],
 
@@ -469,7 +487,7 @@ class AdmissionFormController extends Controller
                 'religion' =>
                     isset($validated['religion'])
                         ? strtoupper(trim($validated['religion']))
-                        : null,
+                        : '',
 
                 'caste' =>
                     isset($validated['caste'])
@@ -499,25 +517,25 @@ class AdmissionFormController extends Controller
                 'locality' =>
                     isset($validated['locality'])
                         ? strtoupper(trim($validated['locality']))
-                        : null,
+                        : '',
 
                 'city' =>
                     isset($validated['city'])
                         ? strtoupper(trim($validated['city']))
-                        : null,
+                        : '',
 
                 'state' =>
                     isset($validated['state'])
                         ? strtoupper(trim($validated['state']))
-                        : null,
+                        : '',
 
                 'pincode' =>
-                    $validated['pincode'] ?? null,
+                    $validated['pincode'] ?? 0,
 
                 'perm_address' =>
                     isset($validated['perm_address'])
                         ? strtoupper(trim($validated['perm_address']))
-                        : null,
+                        : '',
 
 
                 /*
@@ -526,7 +544,7 @@ class AdmissionFormController extends Controller
                 'sibling' =>
                     isset($validated['sibling'])
                         ? strtoupper(trim($validated['sibling']))
-                        : null,
+                        : 'N',
 
                 'sibling_class_id' =>
                     $validated['sibling_class_id'] ?? null,

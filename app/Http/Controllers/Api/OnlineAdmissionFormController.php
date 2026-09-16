@@ -27,7 +27,6 @@ class OnlineAdmissionFormController extends Controller
             'nar_id' => 'required|integer',
         ]);
 
-
         /*
         |--------------------------------------------------------------------------
         | Find Admission Form Using form_id
@@ -325,6 +324,23 @@ class OnlineAdmissionFormController extends Controller
             'other_area' =>
                 'nullable|string|max:50',
         ]);
+
+        if (isset($validated['gender'])) {
+            $validated['gender'] = match (strtolower(trim($validated['gender']))) {
+                'male' => 'M',
+                'female' => 'F',
+                'other' => 'O',
+                default => strtoupper(substr(trim($validated['gender']), 0, 1)),
+            };
+        }
+
+        if (isset($validated['sibling'])) {
+            $validated['sibling'] = match (strtolower(trim($validated['sibling']))) {
+                'yes' => 'Y',
+                'no' => 'N',
+                default => strtoupper(substr(trim($validated['sibling']), 0, 1)),
+            };
+        }
 
 
         /*
