@@ -19,7 +19,7 @@ class AdmissionPaymentController extends Controller
         // 1. Validate form_id
         $validated = $request->validate([
             'form_id' => 'required|string|max:50|exists:online_admission_form,form_id',
-            'nar_id' => 'required|integer',
+            'nar_id' => 'sometimes|integer',
         ]);
 
         // 2. Find admission form
@@ -35,7 +35,8 @@ class AdmissionPaymentController extends Controller
             ], 404);
         }
 
-        if ((int) $admissionForm->nar_id !== (int) $validated['nar_id']) {
+        if (isset($validated['nar_id'])
+            && (int) $admissionForm->nar_id !== (int) $validated['nar_id']) {
             return response()->json([
                 'success' => false,
                 'message' => 'You are not authorized to pay for this admission form.',
@@ -175,7 +176,7 @@ class AdmissionPaymentController extends Controller
 public function paymentStatus(Request $request, $orderId)
 {
     $validated = $request->validate([
-        'nar_id' => 'required|integer',
+        'nar_id' => 'sometimes|integer',
     ]);
 
     $payment = OnlineAdmissionFee::where(
@@ -195,7 +196,15 @@ public function paymentStatus(Request $request, $orderId)
         $payment->form_id
     )->first();
 
-    if (!$admissionForm || (int) $admissionForm->nar_id !== (int) $validated['nar_id']) {
+    if (!$admissionForm) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Admission form not found for this payment.',
+        ], 404);
+    }
+
+    if (isset($validated['nar_id'])
+        && (int) $admissionForm->nar_id !== (int) $validated['nar_id']) {
         return response()->json([
             'success' => false,
             'message' => 'You are not authorized to view this payment.',
