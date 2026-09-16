@@ -47,17 +47,17 @@ Route::get(
 );
 
 Route::get(
-    '/admission/online-form/{id}',
+    '/admission/online-form/{formId}',
     [OnlineAdmissionFormController::class, 'show']
 );
 
 Route::put(
-    '/admission/online-form/{id}',
+    '/admission/online-form/{formId}',
     [OnlineAdmissionFormController::class, 'update']
 );
 
 Route::delete(
-    '/admission/online-form/{id}',
+    '/admission/online-form/{formId}',
     [OnlineAdmissionFormController::class, 'destroy']
 );
 //Admission Document APIs

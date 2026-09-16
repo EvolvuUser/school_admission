@@ -18,7 +18,8 @@ class AdmissionPaymentController extends Controller
     ) {
         // 1. Validate form_id
         $validated = $request->validate([
-            'form_id' => 'required|string|max:20',
+            'form_id' => 'required|string|max:50|exists:online_admission_form,form_id',
+            'nar_id' => 'required|integer',
         ]);
 
         // 2. Find admission form
@@ -32,6 +33,13 @@ class AdmissionPaymentController extends Controller
                 'success' => false,
                 'message' => 'Admission form not found.',
             ], 404);
+        }
+
+        if ((int) $admissionForm->nar_id !== (int) $validated['nar_id']) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not authorized to pay for this admission form.',
+            ], 403);
         }
 
         // 3. Check if payment is already completed
@@ -164,8 +172,12 @@ class AdmissionPaymentController extends Controller
  * GET:
  * /api/admission/payment/{orderId}
  */
-public function paymentStatus($orderId)
+public function paymentStatus(Request $request, $orderId)
 {
+    $validated = $request->validate([
+        'nar_id' => 'required|integer',
+    ]);
+
     $payment = OnlineAdmissionFee::where(
         'OrderId',
         $orderId
@@ -176,6 +188,18 @@ public function paymentStatus($orderId)
             'success' => false,
             'message' => 'Payment record not found.',
         ], 404);
+    }
+
+    $admissionForm = OnlineAdmissionForm::where(
+        'form_id',
+        $payment->form_id
+    )->first();
+
+    if (!$admissionForm || (int) $admissionForm->nar_id !== (int) $validated['nar_id']) {
+        return response()->json([
+            'success' => false,
+            'message' => 'You are not authorized to view this payment.',
+        ], 403);
     }
 
     return response()->json([
@@ -314,9 +338,10 @@ public function paymentStatus($orderId)
                     $payment->form_id
                 )->update([
                     'status' => 'S',
+                    'admission_form_status' => 'Payment Successful',
                 ]);
 
-                return response()->json([
+                return $this->paymentRedirect([
                     'success' => true,
                     'message' => 'Payment successful.',
                     'data' => [
@@ -341,9 +366,10 @@ public function paymentStatus($orderId)
                 $payment->form_id
             )->update([
                 'status' => 'F',
+                'admission_form_status' => 'Payment Failed',
             ]);
 
-            return response()->json([
+            return $this->paymentRedirect([
                 'success' => false,
                 'message' => 'Payment failed.',
                 'data' => [
@@ -356,11 +382,28 @@ public function paymentStatus($orderId)
 
         } catch (\Exception $e) {
 
-            return response()->json([
+            return $this->paymentRedirect([
                 'success' => false,
                 'message' => 'Unable to process payment callback.',
                 'error' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    private function paymentRedirect(array $payload, int $status = 302)
+    {
+        $url = config('payment.worldline.frontend_return_url');
+
+        if (!$url) {
+            return response()->json($payload, $status);
+        }
+
+        return redirect()->away($url . (str_contains($url, '?') ? '&' : '?') . http_build_query([
+            'success' => $payload['success'] ? '1' : '0',
+            'form_id' => $payload['data']['form_id'] ?? null,
+            'order_id' => $payload['data']['order_id'] ?? null,
+            'status' => $payload['data']['status'] ?? null,
+            'message' => $payload['message'] ?? null,
+        ]));
     }
 }

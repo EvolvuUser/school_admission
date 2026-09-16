@@ -12,6 +12,8 @@ return [
 
         'success_url' => env('WORLDLINE_SUCCESS_URL'),
 
+        'frontend_return_url' => env('WORLDLINE_FRONTEND_RETURN_URL'),
+
     ],
 
 ];

@@ -36,6 +36,18 @@ class AdmissionDocumentController extends Controller
      */
     public function upload(Request $request, $formId)
     {
+        $validated = $request->validate([
+            'nar_id' => 'required|integer',
+            'doc_type' => 'required|string|in:BC,PS,FP,SC,BPSC,AC,CC,PC',
+
+            'document' => [
+                'required',
+                'file',
+                'max:10240',
+                'mimes:jpg,jpeg,png,pdf'
+            ],
+        ]);
+
         /*
         |--------------------------------------------------------------------------
         | Check admission form
@@ -51,24 +63,19 @@ class AdmissionDocumentController extends Controller
             ], 404);
         }
 
+        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not authorized to access this admission form.'
+            ], 403);
+        }
+
 
         /*
         |--------------------------------------------------------------------------
         | Validate request
         |--------------------------------------------------------------------------
         */
-
-        $validated = $request->validate([
-            'doc_type' => 'required|string|in:BC,PS,FP,SC,BPSC,AC,CC,PC',
-
-            'document' => [
-                'required',
-                'file',
-                'max:10240',
-                'mimes:jpg,jpeg,png,pdf'
-            ],
-        ]);
-
 
         $docType = strtoupper($validated['doc_type']);
 
@@ -216,8 +223,10 @@ class AdmissionDocumentController extends Controller
      * GET:
      * /api/admission/online-form/{formId}/documents
      */
-    public function index($formId)
+    public function index(Request $request, $formId)
     {
+        $validated = $request->validate(['nar_id' => 'required|integer']);
+
         /*
         |--------------------------------------------------------------------------
         | Check admission form
@@ -231,6 +240,13 @@ class AdmissionDocumentController extends Controller
                 'success' => false,
                 'message' => 'Online admission form not found.'
             ], 404);
+        }
+
+        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not authorized to access this admission form.'
+            ], 403);
         }
 
 
@@ -288,9 +304,20 @@ class AdmissionDocumentController extends Controller
      * GET:
      * /api/admission/online-form/{formId}/documents/{docType}
      */
-    public function view($formId, $docType)
+    public function view(Request $request, $formId, $docType)
     {
+        $validated = $request->validate(['nar_id' => 'required|integer']);
         $docType = strtoupper($docType);
+
+        $student = OnlineAdmissionForm::where('form_id', $formId)->first();
+
+        if (!$student) {
+            return response()->json(['success' => false, 'message' => 'Online admission form not found.'], 404);
+        }
+
+        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
+            return response()->json(['success' => false, 'message' => 'You are not authorized to access this admission form.'], 403);
+        }
 
 
         /*
@@ -383,9 +410,20 @@ class AdmissionDocumentController extends Controller
      * DELETE:
      * /api/admission/online-form/{formId}/documents/{docType}
      */
-    public function destroy($formId, $docType)
+    public function destroy(Request $request, $formId, $docType)
     {
+        $validated = $request->validate(['nar_id' => 'required|integer']);
         $docType = strtoupper($docType);
+
+        $student = OnlineAdmissionForm::where('form_id', $formId)->first();
+
+        if (!$student) {
+            return response()->json(['success' => false, 'message' => 'Online admission form not found.'], 404);
+        }
+
+        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
+            return response()->json(['success' => false, 'message' => 'You are not authorized to access this admission form.'], 403);
+        }
 
 
         /*

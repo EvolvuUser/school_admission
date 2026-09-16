@@ -4,19 +4,41 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Models\AdmissionUploadDocument;
 use App\Models\OnlineAdmissionForm;
 
 class OnlineAdmissionFormController extends Controller
 {
     /**
-     * Get a saved online admission form by ID.
+     * Get a saved online admission form.
      *
      * GET:
-     * /api/admission/online-form/{id}
+     * /api/admission/online-form/{formId}?nar_id=2856
      */
-    public function show($id)
+    public function show(Request $request, $formId)
     {
-        $student = OnlineAdmissionForm::find($id);
+        /*
+        |--------------------------------------------------------------------------
+        | Validate nar_id
+        |--------------------------------------------------------------------------
+        */
+
+        $validated = $request->validate([
+            'nar_id' => 'required|integer',
+        ]);
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Find Admission Form Using form_id
+        |--------------------------------------------------------------------------
+        */
+
+        $student = OnlineAdmissionForm::where(
+            'form_id',
+            $formId
+        )->first();
+
 
         if (!$student) {
             return response()->json([
@@ -25,9 +47,47 @@ class OnlineAdmissionFormController extends Controller
             ], 404);
         }
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | Ownership Check
+        |--------------------------------------------------------------------------
+        */
+
+        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
+
+            return response()->json([
+                'success' => false,
+                'message' =>
+                    'You are not authorized to access this admission form.'
+            ], 403);
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Success Response
+        |--------------------------------------------------------------------------
+        */
+
+        $documents = AdmissionUploadDocument::where('form_id', $student->form_id)
+            ->get()
+            ->map(function ($document) {
+                $document->document_url = asset(
+                    'storage/admission_documents/' . $document->image_name
+                );
+
+                return $document;
+            });
+
         return response()->json([
             'success' => true,
-            'data' => $student
+            'data' => [
+                'application' => $student,
+                'documents' => $documents,
+            ],
+            'form_id' => $student->form_id,
+            'nar_id' => $student->nar_id,
         ]);
     }
 
@@ -37,13 +97,21 @@ class OnlineAdmissionFormController extends Controller
      *
      * GET:
      * /api/admission/online-forms
+     *
+     * NOTE:
+     * This endpoint is currently not protected by nar_id.
+     * We will handle that separately when implementing
+     * complete ownership/security.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $students = OnlineAdmissionForm::orderBy(
-            'adm_form_pk',
-            'desc'
-        )->get();
+        $validated = $request->validate([
+            'nar_id' => 'required|integer',
+        ]);
+
+        $students = OnlineAdmissionForm::where('nar_id', $validated['nar_id'])
+            ->orderByDesc('adm_form_pk')
+            ->get();
 
         return response()->json([
             'success' => true,
@@ -56,144 +124,263 @@ class OnlineAdmissionFormController extends Controller
      * Update student details.
      *
      * PUT:
-     * /api/admission/online-form/{id}
+     * /api/admission/online-form/{formId}?nar_id=2856
      */
-    public function update(Request $request, $id)
+    public function update(Request $request, $formId)
     {
         /*
         |--------------------------------------------------------------------------
-        | Find Existing Application
+        | Validate nar_id
         |--------------------------------------------------------------------------
         */
 
-        $student = OnlineAdmissionForm::find($id);
+        $validated = $request->validate([
+
+            /*
+            |--------------------------------------------------------------------------
+            | Ownership
+            |--------------------------------------------------------------------------
+            */
+
+            'nar_id' => 'required|integer',
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Student Details
+            |--------------------------------------------------------------------------
+            */
+
+            'first_name' =>
+                'sometimes|required|string|max:100',
+
+            'mid_name' =>
+                'nullable|string|max:100',
+
+            'last_name' =>
+                'sometimes|required|string|max:100',
+
+            'dob' =>
+                'sometimes|required|date',
+
+            'birth_place' =>
+                'sometimes|required|string|max:50',
+
+            'gender' =>
+                'sometimes|required|string|max:1',
+
+            'religion' =>
+                'sometimes|required|string|max:100',
+
+            'caste' =>
+                'nullable|string|max:100',
+
+            'subcaste' =>
+                'nullable|string|max:100',
+
+            'nationality' =>
+                'sometimes|required|string|max:100',
+
+            'mother_tongue' =>
+                'sometimes|required|string|max:20',
+
+            'category' =>
+                'sometimes|required|string|max:8',
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Address Details
+            |--------------------------------------------------------------------------
+            */
+
+            'locality' =>
+                'sometimes|required|string|max:50',
+
+            'city' =>
+                'sometimes|required|string|max:30',
+
+            'state' =>
+                'sometimes|required|string|max:30',
+
+            'pincode' =>
+                'sometimes|required|integer',
+
+            'perm_address' =>
+                'sometimes|required|string|max:100',
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Sibling Details
+            |--------------------------------------------------------------------------
+            */
+
+            'sibling' =>
+                'sometimes|required|string|size:1',
+
+            'sibling_class_id' =>
+                'nullable|string|max:10',
+
+            'sibling_student_id' =>
+                'nullable|string|max:100',
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Father Details
+            |--------------------------------------------------------------------------
+            */
+
+            'father_name' =>
+                'nullable|string|max:100',
+
+            'father_occupation' =>
+                'nullable|string|max:100',
+
+            'f_mobile' =>
+                'nullable|string|max:10',
+
+            'f_email' =>
+                'nullable|email|max:50',
+
+            'f_qualification' =>
+                'nullable|string|max:50',
+
+            'f_designation' =>
+                'nullable|string|max:50',
+
+            'f_nature_of_bussiness' =>
+                'nullable|string|max:100',
+
+            'f_office_add' =>
+                'nullable|string|max:100',
+
+            'f_aadhar_no' =>
+                'nullable|string|max:14',
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Mother Details
+            |--------------------------------------------------------------------------
+            */
+
+            'mother_name' =>
+                'nullable|string|max:100',
+
+            'mother_occupation' =>
+                'nullable|string|max:100',
+
+            'm_mobile' =>
+                'nullable|string|max:13',
+
+            'm_emailid' =>
+                'nullable|email|max:50',
+
+            'm_qualification' =>
+                'nullable|string|max:50',
+
+            'm_designation' =>
+                'nullable|string|max:50',
+
+            'm_nature_of_bussiness' =>
+                'nullable|string|max:100',
+
+            'm_office_add' =>
+                'nullable|string|max:100',
+
+            'm_aadhar_no' =>
+                'nullable|string|max:14',
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Additional Details
+            |--------------------------------------------------------------------------
+            */
+
+            'stud_aadhar' =>
+                'nullable|string|max:14',
+
+            'blood_group' =>
+                'nullable|string|max:5',
+
+            'current_school_class' =>
+                'nullable|string|max:100',
+
+            'acheivements' =>
+                'nullable|string|max:100',
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Parent Contribution
+            |--------------------------------------------------------------------------
+            */
+
+            'area_in_which_parent_can_contribute' =>
+                'nullable|string|max:100',
+
+            'other_area' =>
+                'nullable|string|max:50',
+        ]);
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Find Existing Application Using form_id
+        |--------------------------------------------------------------------------
+        |
+        | IMPORTANT:
+        | The API URL uses form_id.
+        | We should NOT use OnlineAdmissionForm::find($formId)
+        | because find() searches the primary key adm_form_pk.
+        |
+        */
+
+        $student = OnlineAdmissionForm::where(
+            'form_id',
+            $formId
+        )->first();
+
 
         if (!$student) {
             return response()->json([
                 'success' => false,
-                'message' => 'Online admission form not found.'
+                'message' =>
+                    'Online admission form not found.'
             ], 404);
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Validation
+        | Ownership Check
         |--------------------------------------------------------------------------
         */
 
-        $validated = $request->validate([
+        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
 
-            // Student details
-
-            'first_name' => 'sometimes|required|string|max:100',
-
-            'mid_name' => 'nullable|string|max:100',
-
-            'last_name' => 'sometimes|required|string|max:100',
-
-            'dob' => 'sometimes|required|date',
-
-            'birth_place' => 'sometimes|required|string|max:50',
-
-            'gender' => 'sometimes|required|string|max:1',
-
-            'religion' => 'sometimes|required|string|max:100',
-
-            'caste' => 'nullable|string|max:100',
-
-            'subcaste' => 'nullable|string|max:100',
-
-            'nationality' => 'sometimes|required|string|max:100',
-
-            'mother_tongue' => 'sometimes|required|string|max:20',
-
-            'category' => 'sometimes|required|string|max:8',
+            return response()->json([
+                'success' => false,
+                'message' =>
+                    'You are not authorized to update this admission form.'
+            ], 403);
+        }
 
 
-            // Address details
+        /*
+        |--------------------------------------------------------------------------
+        | Remove nar_id Before Updating
+        |--------------------------------------------------------------------------
+        |
+        | nar_id is only used for ownership verification.
+        | It must NOT be changed by the update request.
+        |
+        */
 
-            'locality' => 'sometimes|required|string|max:50',
-
-            'city' => 'sometimes|required|string|max:30',
-
-            'state' => 'sometimes|required|string|max:30',
-
-            'pincode' => 'sometimes|required|integer',
-
-            'perm_address' => 'sometimes|required|string|max:100',
-
-
-            // Sibling details
-
-            'sibling' => 'sometimes|required|string|size:1',
-
-            'sibling_class_id' => 'nullable|string|max:10',
-
-            'sibling_student_id' => 'nullable|string|max:100',
-
-
-            // Father details
-
-            'father_name' => 'nullable|string|max:100',
-
-            'father_occupation' => 'nullable|string|max:100',
-
-            'f_mobile' => 'nullable|string|max:10',
-
-            'f_email' => 'nullable|email|max:50',
-
-            'f_qualification' => 'nullable|string|max:50',
-
-            'f_designation' => 'nullable|string|max:50',
-
-            'f_nature_of_bussiness' => 'nullable|string|max:100',
-
-            'f_office_add' => 'nullable|string|max:100',
-
-            'f_aadhar_no' => 'nullable|string|max:14',
-
-
-            // Mother details
-
-            'mother_name' => 'nullable|string|max:100',
-
-            'mother_occupation' => 'nullable|string|max:100',
-
-            'm_mobile' => 'nullable|string|max:13',
-
-            'm_emailid' => 'nullable|email|max:50',
-
-            'm_qualification' => 'nullable|string|max:50',
-
-            'm_designation' => 'nullable|string|max:50',
-
-            'm_nature_of_bussiness' => 'nullable|string|max:100',
-
-            'm_office_add' => 'nullable|string|max:100',
-
-            'm_aadhar_no' => 'nullable|string|max:14',
-
-
-            // Additional details
-
-            'stud_aadhar' => 'nullable|string|max:14',
-
-            'blood_group' => 'nullable|string|max:5',
-
-            'current_school_class' => 'nullable|string|max:100',
-
-            'acheivements' => 'nullable|string|max:100',
-
-
-            // Parent contribution
-
-            'area_in_which_parent_can_contribute'
-                => 'nullable|string|max:100',
-
-            'other_area'
-                => 'nullable|string|max:50',
-        ]);
+        unset($validated['nar_id']);
 
 
         /*
@@ -254,7 +441,8 @@ class OnlineAdmissionFormController extends Controller
                 is_string($value) &&
                 in_array($key, $uppercaseFields)
             ) {
-                $validated[$key] = strtoupper(trim($value));
+                $validated[$key] =
+                    strtoupper(trim($value));
             }
         }
 
@@ -270,8 +458,6 @@ class OnlineAdmissionFormController extends Controller
         | academic_yr
         | class_id
         | nar_id
-        |
-        | These values belong to the original application.
         |
         */
 
@@ -296,11 +482,20 @@ class OnlineAdmissionFormController extends Controller
         */
 
         return response()->json([
+
             'success' => true,
 
-            'message' => 'Student details updated successfully.',
+            'message' =>
+                'Student details updated successfully.',
 
             'data' => [
+
+                /*
+                |--------------------------------------------------------------------------
+                | Application Information
+                |--------------------------------------------------------------------------
+                */
+
                 'adm_form_pk' =>
                     $student->adm_form_pk,
 
@@ -317,7 +512,11 @@ class OnlineAdmissionFormController extends Controller
                     $student->class_id,
 
 
-                // Student details
+                /*
+                |--------------------------------------------------------------------------
+                | Student Details
+                |--------------------------------------------------------------------------
+                */
 
                 'first_name' =>
                     $student->first_name,
@@ -356,7 +555,11 @@ class OnlineAdmissionFormController extends Controller
                     $student->category,
 
 
-                // Address details
+                /*
+                |--------------------------------------------------------------------------
+                | Address Details
+                |--------------------------------------------------------------------------
+                */
 
                 'locality' =>
                     $student->locality,
@@ -374,7 +577,11 @@ class OnlineAdmissionFormController extends Controller
                     $student->perm_address,
 
 
-                // Sibling details
+                /*
+                |--------------------------------------------------------------------------
+                | Sibling Details
+                |--------------------------------------------------------------------------
+                */
 
                 'sibling' =>
                     $student->sibling,
@@ -386,7 +593,11 @@ class OnlineAdmissionFormController extends Controller
                     $student->sibling_student_id,
 
 
-                // Father details
+                /*
+                |--------------------------------------------------------------------------
+                | Father Details
+                |--------------------------------------------------------------------------
+                */
 
                 'father_name' =>
                     $student->father_name,
@@ -416,7 +627,11 @@ class OnlineAdmissionFormController extends Controller
                     $student->f_aadhar_no,
 
 
-                // Mother details
+                /*
+                |--------------------------------------------------------------------------
+                | Mother Details
+                |--------------------------------------------------------------------------
+                */
 
                 'mother_name' =>
                     $student->mother_name,
@@ -446,7 +661,11 @@ class OnlineAdmissionFormController extends Controller
                     $student->m_aadhar_no,
 
 
-                // Additional details
+                /*
+                |--------------------------------------------------------------------------
+                | Additional Details
+                |--------------------------------------------------------------------------
+                */
 
                 'stud_aadhar' =>
                     $student->stud_aadhar,
@@ -461,7 +680,11 @@ class OnlineAdmissionFormController extends Controller
                     $student->acheivements,
 
 
-                // Parent contribution
+                /*
+                |--------------------------------------------------------------------------
+                | Parent Contribution
+                |--------------------------------------------------------------------------
+                */
 
                 'area_in_which_parent_can_contribute' =>
                     $student->area_in_which_parent_can_contribute,
@@ -470,7 +693,11 @@ class OnlineAdmissionFormController extends Controller
                     $student->other_area,
 
 
-                // Status
+                /*
+                |--------------------------------------------------------------------------
+                | Status
+                |--------------------------------------------------------------------------
+                */
 
                 'admission_form_status' =>
                     $student->admission_form_status,
@@ -483,24 +710,77 @@ class OnlineAdmissionFormController extends Controller
      * Delete online admission form.
      *
      * DELETE:
-     * /api/admission/online-form/{id}
+     * /api/admission/online-form/{formId}?nar_id=2856
      */
-    public function destroy($id)
+    public function destroy(Request $request, $formId)
     {
-        $student = OnlineAdmissionForm::find($id);
+        /*
+        |--------------------------------------------------------------------------
+        | Validate nar_id
+        |--------------------------------------------------------------------------
+        */
+
+        $validated = $request->validate([
+            'nar_id' => 'required|integer',
+        ]);
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Find Admission Form Using form_id
+        |--------------------------------------------------------------------------
+        */
+
+        $student = OnlineAdmissionForm::where(
+            'form_id',
+            $formId
+        )->first();
+
 
         if (!$student) {
             return response()->json([
                 'success' => false,
-                'message' => 'Online admission form not found.'
+                'message' =>
+                    'Online admission form not found.'
             ], 404);
         }
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | Ownership Check
+        |--------------------------------------------------------------------------
+        */
+
+        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
+
+            return response()->json([
+                'success' => false,
+                'message' =>
+                    'You are not authorized to delete this admission form.'
+            ], 403);
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Delete
+        |--------------------------------------------------------------------------
+        */
+
         $student->delete();
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Success Response
+        |--------------------------------------------------------------------------
+        */
 
         return response()->json([
             'success' => true,
-            'message' => 'Online admission form deleted successfully.'
+            'message' =>
+                'Online admission form deleted successfully.'
         ]);
     }
 }

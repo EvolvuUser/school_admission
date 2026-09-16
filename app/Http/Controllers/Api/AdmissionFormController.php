@@ -84,6 +84,28 @@ class AdmissionFormController extends Controller
      */
     public function saveStudentDetails(Request $request)
     {
+        $fieldAliases = [
+            'classId' => 'class_id',
+            'academicYear' => 'academic_yr',
+            'narId' => 'nar_id',
+            'firstName' => 'first_name',
+            'middleName' => 'mid_name',
+            'lastName' => 'last_name',
+            'dateOfBirth' => 'dob',
+            'birthPlace' => 'birth_place',
+            'motherTongue' => 'mother_tongue',
+            'siblingClassId' => 'sibling_class_id',
+            'siblingStudentId' => 'sibling_student_id',
+            'smsSendingPhoneNo' => 'sms_sending_phone_no',
+            'permAddress' => 'perm_address',
+        ];
+
+        foreach ($fieldAliases as $alias => $field) {
+            if (!$request->has($field) && $request->has($alias)) {
+                $request->merge([$field => $request->input($alias)]);
+            }
+        }
+
         /*
         |--------------------------------------------------------------------------
         | Validation
@@ -97,10 +119,6 @@ class AdmissionFormController extends Controller
              */
             'class_id' => 'required|integer',
 
-            /*
-             * Requested academic year.
-             */
-            'academic_yr' => 'required|string|max:11',
 
             /*
              * Registration ID.
@@ -202,29 +220,22 @@ class AdmissionFormController extends Controller
 
 
             /*
-            |--------------------------------------------------------------------------
-            | Find Admission Form
-            |--------------------------------------------------------------------------
-            |
-            | We use BOTH:
-            |
-            | class_id
-            | academic_yr
-            |
-            | Therefore the requested academic year is used consistently.
-            |
-            */
-
+|--------------------------------------------------------------------------
+| Find Admission Form
+|--------------------------------------------------------------------------
+|
+| The selected class determines the active admission form.
+| The academic year is retrieved automatically from the
+| matched admission_forms record.
+|
+*/
             $admissionForm = AdmissionForm::where(
-                    'class_id',
-                    $validated['class_id']
-                )
-                ->where(
-                    'academic_yr',
-                    $validated['academic_yr']
-                )
-                ->where('is_active', 'Y')
-                ->first();
+        'class_id',
+        $validated['class_id']
+    )
+    ->where('is_active', 'Y')
+    ->orderByDesc('academic_yr')
+    ->first();
 
 
             if (!$admissionForm) {
