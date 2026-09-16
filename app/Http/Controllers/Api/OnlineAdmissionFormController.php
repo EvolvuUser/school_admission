@@ -167,7 +167,7 @@ class OnlineAdmissionFormController extends Controller
                 'sometimes|required|string|max:50',
 
             'gender' =>
-                'sometimes|required|string|max:1',
+                'sometimes|required|string|max:20',
 
             'religion' =>
                 'sometimes|required|string|max:100',
@@ -217,7 +217,7 @@ class OnlineAdmissionFormController extends Controller
             */
 
             'sibling' =>
-                'sometimes|required|string|size:1',
+                'sometimes|required|string|max:20',
 
             'sibling_class_id' =>
                 'nullable|string|max:10',

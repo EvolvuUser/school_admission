@@ -90,9 +90,12 @@ class AdmissionFormController extends Controller
             'narId' => 'nar_id',
             'firstName' => 'first_name',
             'middleName' => 'mid_name',
+            'middle_name' => 'mid_name',
             'lastName' => 'last_name',
             'dateOfBirth' => 'dob',
+            'date_of_birth' => 'dob',
             'birthPlace' => 'birth_place',
+            'mother_tongue' => 'mother_tongue',
             'motherTongue' => 'mother_tongue',
             'siblingClassId' => 'sibling_class_id',
             'siblingStudentId' => 'sibling_student_id',
@@ -138,7 +141,7 @@ class AdmissionFormController extends Controller
 
             'birth_place' => 'required|string|max:50',
 
-            'gender' => 'required|string|max:1',
+            'gender' => 'required|string|max:20',
 
             'religion' => 'nullable|string|max:100',
 
@@ -155,22 +158,22 @@ class AdmissionFormController extends Controller
             /*
              * Address details.
              */
-            'locality' => 'required|string|max:50',
+            'locality' => 'nullable|string|max:50',
 
-            'city' => 'required|string|max:30',
+            'city' => 'nullable|string|max:30',
 
-            'state' => 'required|string|max:30',
+            'state' => 'nullable|string|max:30',
 
-            'pincode' => 'required|integer',
+            'pincode' => 'nullable|integer',
 
-            'perm_address' => 'required|string|max:100',
+            'perm_address' => 'nullable|string|max:100',
 
             /*
              * Sibling details.
              *
              * Database requires sibling.
              */
-            'sibling' => 'required|string|size:1',
+            'sibling' => 'nullable|string|max:20',
 
             'sibling_class_id' => 'nullable|string|max:10',
 
@@ -494,26 +497,36 @@ class AdmissionFormController extends Controller
                  * Address details.
                  */
                 'locality' =>
-                    strtoupper(trim($validated['locality'])),
+                    isset($validated['locality'])
+                        ? strtoupper(trim($validated['locality']))
+                        : null,
 
                 'city' =>
-                    strtoupper(trim($validated['city'])),
+                    isset($validated['city'])
+                        ? strtoupper(trim($validated['city']))
+                        : null,
 
                 'state' =>
-                    strtoupper(trim($validated['state'])),
+                    isset($validated['state'])
+                        ? strtoupper(trim($validated['state']))
+                        : null,
 
                 'pincode' =>
-                    $validated['pincode'],
+                    $validated['pincode'] ?? null,
 
                 'perm_address' =>
-                    strtoupper(trim($validated['perm_address'])),
+                    isset($validated['perm_address'])
+                        ? strtoupper(trim($validated['perm_address']))
+                        : null,
 
 
                 /*
                  * Sibling details.
                  */
                 'sibling' =>
-                    strtoupper(trim($validated['sibling'])),
+                    isset($validated['sibling'])
+                        ? strtoupper(trim($validated['sibling']))
+                        : null,
 
                 'sibling_class_id' =>
                     $validated['sibling_class_id'] ?? null,
