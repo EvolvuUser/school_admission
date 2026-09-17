@@ -118,6 +118,155 @@ class OnlineAdmissionFormController extends Controller
         ]);
     }
 
+    /**
+     * Download a saved online admission form as PDF.
+     *
+     * GET:
+     * /api/admission/online-form/{formId}/download?nar_id=2856
+     */
+    public function download(Request $request, $formId)
+    {
+        $request->merge([
+            'nar_id' => $request->query('nar_id', $request->input('nar_id', $request->input('narId'))),
+        ]);
+
+        $validated = $request->validate([
+            'nar_id' => 'required|integer',
+        ]);
+
+        $student = OnlineAdmissionForm::where('form_id', $formId)->first();
+
+        if (!$student) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Online admission form not found.'
+            ], 404);
+        }
+
+        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not authorized to access this admission form.'
+            ], 403);
+        }
+
+        $documents = AdmissionUploadDocument::where('form_id', $student->form_id)
+            ->orderBy('doc_type')
+            ->get();
+
+        $pdfBinary = $this->generatePdf($student, $documents);
+
+        return response($pdfBinary, 200)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', 'attachment; filename="' . $formId . '-admission-form.pdf"')
+            ->header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            ->header('Pragma', 'no-cache')
+            ->header('Expires', '0');
+    }
+
+    private function generatePdf($student, $documents)
+    {
+        $title = 'Admission Form - ' . $student->form_id;
+        $lines = [
+            'Evolvu Smart School',
+            'Online Admission Form',
+            '',
+            'Form No: ' . ($student->form_id ?? 'N/A'),
+            'Student Name: ' . trim(($student->first_name ?? '') . ' ' . ($student->middle_name ?? '') . ' ' . ($student->last_name ?? '')),
+            'Class: ' . ($student->class_id ?? 'N/A'),
+            'Academic Year: ' . ($student->academic_yr ?? 'N/A'),
+            'Status: ' . ($student->status ?? 'N/A'),
+            '',
+            'Student Profile',
+            'DOB: ' . ($student->dob ?? 'N/A'),
+            'Gender: ' . ($student->gender ?? 'N/A'),
+            'Religion: ' . ($student->religion ?? 'N/A'),
+            'Caste: ' . ($student->caste ?? 'N/A'),
+            'Nationality: ' . ($student->nationality ?? 'N/A'),
+            'Mother Tongue: ' . ($student->mother_tongue ?? 'N/A'),
+            '',
+            'Parent Profile',
+            'Father Name: ' . ($student->father_name ?? 'N/A'),
+            'Father Mobile: ' . ($student->f_mobile ?? 'N/A'),
+            'Father Email: ' . ($student->f_email ?? 'N/A'),
+            'Mother Name: ' . ($student->mother_name ?? 'N/A'),
+            'Mother Mobile: ' . ($student->m_mobile ?? 'N/A'),
+            'Mother Email: ' . ($student->m_emailid ?? 'N/A'),
+            '',
+            'Address',
+            'Locality: ' . ($student->locality ?? 'N/A'),
+            'City: ' . ($student->city ?? 'N/A'),
+            'State: ' . ($student->state ?? 'N/A'),
+            'Pincode: ' . ($student->pincode ?? 'N/A'),
+            'Permanent Address: ' . ($student->perm_address ?? 'N/A'),
+            '',
+            'Declaration',
+            'I affirm that the information provided above is true and correct to the best of my knowledge.',
+            '',
+            'Uploaded Documents',
+        ];
+
+        if ($documents->isEmpty()) {
+            $lines[] = 'No uploaded documents found.';
+        } else {
+            foreach ($documents as $document) {
+                $label = $document->doc_type ?? 'DOC';
+                $lines[] = '- ' . $label . ': ' . ($document->image_name ?? 'Uploaded');
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = 'For Office Use';
+        $lines[] = 'Admitted / Not Admitted: ____________________';
+        $lines[] = 'Class: ____________________';
+        $lines[] = 'W.E.F.: ____________________';
+        $lines[] = 'Principal Signature: ____________________';
+
+        $content = "BT\n/F1 18 Tf\n50 800 Td\n(" . $this->escapePdfText($title) . ") Tj\nET\n";
+
+        $y = 760;
+        foreach ($lines as $line) {
+            $content .= "BT\n/F1 11 Tf\n50 $y Td\n(" . $this->escapePdfText($line) . ") Tj\nET\n";
+            $y -= 18;
+            if ($y < 80) {
+                break;
+            }
+        }
+
+        $objects = [];
+        $objects[] = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+        $objects[] = "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
+        $objects[] = "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n";
+        $objects[] = "4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n";
+        $objects[] = "5 0 obj\n<< /Length " . strlen($content) . " >>\nstream\n" . $content . "endstream\nendobj\n";
+
+        $pdf = "%PDF-1.4\n";
+        $offsets = [0];
+        foreach ($objects as $object) {
+            $offsets[] = strlen($pdf);
+            $pdf .= $object;
+        }
+
+        $xrefStart = strlen($pdf);
+        $pdf .= "xref\n0 6\n0000000000 65535 f \n";
+        for ($i = 1; $i < count($offsets); $i++) {
+            $pdf .= sprintf('%010d 00000 n \n', $offsets[$i]);
+        }
+
+        $pdf .= "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" . $xrefStart . "\n%%EOF";
+
+        return $pdf;
+    }
+
+    private function escapePdfText($text)
+    {
+        return str_replace(
+            ['\\', '(', ')'],
+            ['\\\\', '\\(', '\\)'],
+            (string) $text
+        );
+    }
+
 
     /**
      * Update student details.

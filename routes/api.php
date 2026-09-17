@@ -51,6 +51,11 @@ Route::get(
     [OnlineAdmissionFormController::class, 'show']
 );
 
+Route::get(
+    '/admission/online-form/{formId}/download',
+    [OnlineAdmissionFormController::class, 'download']
+);
+
 Route::put(
     '/admission/online-form/{formId}',
     [OnlineAdmissionFormController::class, 'update']
