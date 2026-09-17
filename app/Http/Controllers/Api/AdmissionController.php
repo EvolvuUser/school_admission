@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Admission;
 use App\Models\AdmissionUser;
+use App\Models\OnlineAdmissionForm;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -53,26 +54,57 @@ class AdmissionController extends Controller
         ], 422);
     }
 
-    $registration = Admission::create([
-        'parent_name' => $validated['parent_name'],
+    $email = !empty($validated['email']) ? strtolower(trim($validated['email'])) : null;
+    $phoneNo = !empty($validated['phone_no']) ? preg_replace('/\D+/', '', trim($validated['phone_no'])) : null;
 
-        // Existing DB design uses blank value instead of NULL
-        'email' => !empty($validated['email'])
-            ? $validated['email']
-            : ' ',
+    $registration = null;
 
-        'phone_no' => !empty($validated['phone_no'])
-            ? $validated['phone_no']
-            : ' ',
+    if ($phoneNo) {
+        $registration = Admission::whereRaw('TRIM(COALESCE(phone_no, "")) = ?', [$phoneNo])->first();
+    }
 
-        'date' => now()->toDateString(),
-    ]);
+    if (!$registration && $email) {
+        $registration = Admission::whereRaw('LOWER(TRIM(COALESCE(email, ""))) = ?', [$email])->first();
+    }
+
+    if (!$registration) {
+        $registration = Admission::create([
+            'parent_name' => $validated['parent_name'],
+            'email' => $email ?: ' ',
+            'phone_no' => $phoneNo ?: ' ',
+            'date' => now()->toDateString(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Registration created successfully',
+            'data' => $registration
+        ], 201);
+    }
+
+    $updateData = [];
+
+    if ($email && trim((string) $registration->email) === '') {
+        $updateData['email'] = $email;
+    }
+
+    if ($phoneNo && trim((string) $registration->phone_no) === '') {
+        $updateData['phone_no'] = $phoneNo;
+    }
+
+    if (!empty($validated['parent_name']) && trim((string) $registration->parent_name) !== trim((string) $validated['parent_name'])) {
+        $updateData['parent_name'] = trim($validated['parent_name']);
+    }
+
+    if (!empty($updateData)) {
+        $registration->update($updateData);
+    }
 
     return response()->json([
         'success' => true,
-        'message' => 'Registration created successfully',
-        'data' => $registration
-    ], 201);
+        'message' => 'Registration found successfully',
+        'data' => $registration->fresh(),
+    ]);
 }
 
 
@@ -643,17 +675,18 @@ public function getFormFee(Request $request)
 public function getDashboard(Request $request)
 {
     $validated = $request->validate([
-        'nar_id' => 'required'
+        'nar_id' => 'required|integer'
     ]);
 
-    $totalForms = DB::table('online_admission_form')
-        ->where('nar_id', $validated['nar_id'])
-        ->count();
+    $narId = (int) $validated['nar_id'];
+    $totalForms = OnlineAdmissionForm::where('nar_id', $narId)->count();
 
     return response()->json([
         'success' => true,
         'data' => [
-            'forms_count' => $totalForms
+            'nar_id' => $narId,
+            'forms_count' => $totalForms,
+            'totalFormsRegistered' => $totalForms,
         ]
     ]);
 }
