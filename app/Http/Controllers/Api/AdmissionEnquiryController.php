@@ -36,6 +36,31 @@ class AdmissionEnquiryController extends Controller
             ]
         ]);
     }
+    /**
+ * Get gender options for Admission Enquiry.
+ *
+ * GET:
+ * /api/admission/enquiry/genders
+ */
+public function getGenders()
+{
+    $genders = DB::table('admission_form_field_options')
+        ->where('field_name', 'gender')
+        ->where('is_active', 'Y')
+        ->orderBy('display_order')
+        ->get([
+            'field_option_id',
+            'option_value'
+        ]);
+
+    return response()->json([
+        'success' => true,
+
+        'data' => [
+            'genders' => $genders
+        ]
+    ]);
+}
 
 
     /**

@@ -128,3 +128,7 @@ Route::get(
     '/admission/enquiry/classes',
     [AdmissionEnquiryController::class, 'getClasses']
 );
+Route::get(
+    '/admission/enquiry/genders',
+    [AdmissionEnquiryController::class, 'getGenders']
+);
