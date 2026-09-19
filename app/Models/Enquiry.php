@@ -19,7 +19,7 @@ class Enquiry extends Model
         'dob',
         'gender',
 
-        'class_id',
+        'class',
 
         'father_name',
         'mother_name',

@@ -6,11 +6,40 @@ use App\Http\Controllers\Controller;
 use App\Models\Enquiry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
 
 class AdmissionEnquiryController extends Controller
 {
     /**
-     * Create a new admission enquiry.
+     * Get all classes for Admission Enquiry.
+     *
+     * GET:
+     * /api/admission/enquiry/classes
+     *
+     * This returns ALL classes from the class table.
+     */
+    public function getClasses()
+    {
+        $classes = DB::table('class')
+            ->select(
+                'class_id',
+                'name'
+            )
+            ->orderBy('name')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+
+            'data' => [
+                'classes' => $classes
+            ]
+        ]);
+    }
+
+
+    /**
+     * Create Admission Enquiry.
      *
      * POST:
      * /api/admission/enquiries
@@ -31,62 +60,96 @@ class AdmissionEnquiryController extends Controller
             |--------------------------------------------------------------------------
             */
 
-            'first_name' =>
-                'required|string|max:100',
+            'first_name' => [
+                'required',
+                'string',
+                'max:100'
+            ],
 
-            'last_name' =>
-                'nullable|string|max:100',
+            'last_name' => [
+                'required',
+                'string',
+                'max:100'
+            ],
 
-            'dob' =>
-                'nullable|date',
+            'dob' => [
+                'required'
+            ],
 
-            'gender' =>
-                'required|string|in:M,F,O',
+            'gender' => [
+                'required',
+                'string',
+                'in:Male,Female,Other'
+            ],
 
             /*
-            |--------------------------------------------------------------------------
-            | Class
-            |--------------------------------------------------------------------------
-            */
+             * IMPORTANT:
+             *
+             * Frontend sends:
+             *
+             * UKG
+             * Grade 1
+             * Grade 2
+             *
+             * NOT class_id.
+             */
+            'class' => [
+                'required',
+                'string',
+                'max:100'
+            ],
 
-            'class_id' =>
-                'required|integer',
 
             /*
             |--------------------------------------------------------------------------
             | Parent Details
             |--------------------------------------------------------------------------
-            |
-            | At least one parent's name is required.
-            |
             */
 
-            'father_name' =>
-                'nullable|string|max:150',
+            'father_name' => [
+                'nullable',
+                'string',
+                'max:100'
+            ],
 
-            'mother_name' =>
-                'nullable|string|max:150',
+            'mother_name' => [
+                'nullable',
+                'string',
+                'max:100'
+            ],
+
 
             /*
             |--------------------------------------------------------------------------
-            | Contact
+            | Contact Details
             |--------------------------------------------------------------------------
             */
 
-            'contact_no' =>
-                'required|string|max:20',
+            'contact_no' => [
+                'required',
+                'string',
+                'max:20'
+            ],
 
-            'email' =>
-                'nullable|email|max:150',
+            'email' => [
+                'nullable',
+                'email',
+                'max:150'
+            ],
+
 
             /*
             |--------------------------------------------------------------------------
-            | School
+            | School Details
             |--------------------------------------------------------------------------
             */
 
-            'current_school' =>
-                'nullable|string|max:200',
+            'current_school' => [
+                'nullable',
+                'string',
+                'max:200'
+            ],
+
 
             /*
             |--------------------------------------------------------------------------
@@ -94,8 +157,10 @@ class AdmissionEnquiryController extends Controller
             |--------------------------------------------------------------------------
             */
 
-            'all_documents_available' =>
-                'required|boolean',
+            'all_documents_available' => [
+                'nullable'
+            ],
+
 
             /*
             |--------------------------------------------------------------------------
@@ -103,8 +168,10 @@ class AdmissionEnquiryController extends Controller
             |--------------------------------------------------------------------------
             */
 
-            'question' =>
-                'nullable|string|max:2000',
+            'question' => [
+                'nullable',
+                'string'
+            ],
         ]);
 
 
@@ -112,6 +179,9 @@ class AdmissionEnquiryController extends Controller
         |--------------------------------------------------------------------------
         | Validate Parent Name
         |--------------------------------------------------------------------------
+        |
+        | At least one parent name is required.
+        |
         */
 
         if (
@@ -124,7 +194,7 @@ class AdmissionEnquiryController extends Controller
                 'success' => false,
 
                 'message' =>
-                    'At least one parent name is required.',
+                    'At least one parent name is required.'
 
             ], 422);
         }
@@ -132,15 +202,23 @@ class AdmissionEnquiryController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Check Class
+        | Find Selected Class
         |--------------------------------------------------------------------------
+        |
+        | The frontend sends the class NAME.
+        |
+        | Example:
+        |
+        | "class": "UKG"
+        |
+        | We verify that this class exists in the class table.
+        |
         */
 
+        $className = trim($validated['class']);
+
         $class = DB::table('class')
-            ->where(
-                'class_id',
-                $validated['class_id']
-            )
+            ->where('name', $className)
             ->first();
 
 
@@ -151,65 +229,101 @@ class AdmissionEnquiryController extends Controller
                 'success' => false,
 
                 'message' =>
-                    'Selected class not found.',
+                    'Selected class not found.'
 
-            ], 404);
+            ], 422);
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Generate Enquiry Number
+        | Convert Gender
         |--------------------------------------------------------------------------
         |
-        | Example:
+        | Frontend:
         |
-        | ENQ-2026-0001
-        | ENQ-2026-0002
-        | ENQ-2026-0003
+        | Male
+        | Female
+        | Other
+        |
+        | Database:
+        |
+        | M
+        | F
+        | O
         |
         */
 
-        $year = now()->format('Y');
+        $genderMap = [
+
+            'Male' => 'M',
+
+            'Female' => 'F',
+
+            'Other' => 'O',
+        ];
 
 
-        $lastEnquiry = Enquiry::where(
-            'enquiry_number',
-            'like',
-            'ENQ-' . $year . '-%'
-        )
-        ->orderByDesc('id')
-        ->first();
+        $gender = $genderMap[
+            $validated['gender']
+        ];
 
 
-        if ($lastEnquiry) {
+        /*
+        |--------------------------------------------------------------------------
+        | Convert Date of Birth
+        |--------------------------------------------------------------------------
+        |
+        | Frontend:
+        |
+        | 02/06/2024
+        |
+        | Database:
+        |
+        | 2024-02-06
+        |
+        */
 
-            $lastNumber = (int) substr(
-                $lastEnquiry->enquiry_number,
-                strrpos(
-                    $lastEnquiry->enquiry_number,
-                    '-'
-                ) + 1
-            );
+        try {
 
-            $nextNumber = $lastNumber + 1;
+            $dob = Carbon::createFromFormat(
+                'm/d/Y',
+                $validated['dob']
+            )->format('Y-m-d');
 
-        } else {
+        } catch (\Exception $e) {
 
-            $nextNumber = 1;
+            return response()->json([
+
+                'success' => false,
+
+                'message' =>
+                    'Invalid date of birth. Please use MM/DD/YYYY format.'
+
+            ], 422);
         }
 
 
-        $enquiryNumber =
-            'ENQ-' .
-            $year .
-            '-' .
-            str_pad(
-                $nextNumber,
-                4,
-                '0',
-                STR_PAD_LEFT
-            );
+        /*
+        |--------------------------------------------------------------------------
+        | Convert Documents Value
+        |--------------------------------------------------------------------------
+        |
+        | Frontend may send:
+        |
+        | true
+        | false
+        |
+        | or:
+        |
+        | "true"
+        | "false"
+        |
+        */
+
+        $documentsAvailable = $request->boolean(
+            'all_documents_available'
+        );
 
 
         /*
@@ -220,62 +334,108 @@ class AdmissionEnquiryController extends Controller
 
         $enquiry = Enquiry::create([
 
-            'enquiry_number' =>
-                $enquiryNumber,
+            /*
+            |--------------------------------------------------------------------------
+            | Student
+            |--------------------------------------------------------------------------
+            */
 
             'first_name' =>
                 trim($validated['first_name']),
 
             'last_name' =>
-                isset($validated['last_name'])
-                    ? trim($validated['last_name'])
-                    : null,
+                trim($validated['last_name']),
 
             'dob' =>
-                $validated['dob'] ?? null,
+                $dob,
 
             'gender' =>
-                strtoupper($validated['gender']),
+                $gender,
 
-            'class_id' =>
-                $validated['class_id'],
+
+            /*
+            |--------------------------------------------------------------------------
+            | Class
+            |--------------------------------------------------------------------------
+            |
+            | IMPORTANT:
+            |
+            | We save the CLASS NAME.
+            |
+            | Example:
+            |
+            | UKG
+            |
+            | NOT:
+            |
+            | 150
+            |
+            */
+
+            'class' =>
+                $class->name,
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Parent
+            |--------------------------------------------------------------------------
+            */
 
             'father_name' =>
-                isset($validated['father_name'])
+                !empty($validated['father_name'])
                     ? trim($validated['father_name'])
                     : null,
 
             'mother_name' =>
-                isset($validated['mother_name'])
+                !empty($validated['mother_name'])
                     ? trim($validated['mother_name'])
                     : null,
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Contact
+            |--------------------------------------------------------------------------
+            */
 
             'contact_no' =>
                 trim($validated['contact_no']),
 
             'email' =>
-                isset($validated['email'])
-                    ? trim($validated['email'])
-                    : null,
+                $validated['email'] ?? null,
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | School
+            |--------------------------------------------------------------------------
+            */
 
             'current_school' =>
                 isset($validated['current_school'])
                     ? trim($validated['current_school'])
                     : null,
 
+
+            /*
+            |--------------------------------------------------------------------------
+            | Documents
+            |--------------------------------------------------------------------------
+            */
+
             'all_documents_available' =>
-                $validated['all_documents_available'],
+                $documentsAvailable ? 'Y' : 'N',
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Question
+            |--------------------------------------------------------------------------
+            */
 
             'question' =>
-                isset($validated['question'])
-                    ? trim($validated['question'])
-                    : null,
-
-            'source' =>
-                'WEBSITE',
-
-            'status' =>
-                'NEW',
+                $validated['question'] ?? null,
         ]);
 
 
@@ -297,9 +457,6 @@ class AdmissionEnquiryController extends Controller
                 'id' =>
                     $enquiry->id,
 
-                'enquiry_number' =>
-                    $enquiry->enquiry_number,
-
                 'first_name' =>
                     $enquiry->first_name,
 
@@ -307,18 +464,19 @@ class AdmissionEnquiryController extends Controller
                     $enquiry->last_name,
 
                 'dob' =>
-                    $enquiry->dob
-                        ? $enquiry->dob->format('Y-m-d')
-                        : null,
+                    $enquiry->dob,
 
+                /*
+                 * Return frontend-friendly value.
+                 */
                 'gender' =>
-                    $enquiry->gender,
+                    $validated['gender'],
 
-                'class_id' =>
-                    $enquiry->class_id,
-
-                'class_name' =>
-                    $class->name ?? null,
+                /*
+                 * Return class NAME.
+                 */
+                'class' =>
+                    $enquiry->class,
 
                 'father_name' =>
                     $enquiry->father_name,
@@ -340,12 +498,6 @@ class AdmissionEnquiryController extends Controller
 
                 'question' =>
                     $enquiry->question,
-
-                'source' =>
-                    $enquiry->source,
-
-                'status' =>
-                    $enquiry->status,
 
                 'created_at' =>
                     $enquiry->created_at,
@@ -367,63 +519,28 @@ class AdmissionEnquiryController extends Controller
             ->get();
 
 
-        return response()->json([
+        /*
+        |--------------------------------------------------------------------------
+        | Convert Gender For Frontend
+        |--------------------------------------------------------------------------
+        */
 
-            'success' => true,
+        $enquiries->transform(function ($enquiry) {
 
-            'data' => [
+            $genderMap = [
 
-                'enquiries' =>
-                    $enquiries,
-            ]
+                'M' => 'Male',
 
-        ]);
-    }
+                'F' => 'Female',
 
-
-    /**
-     * Get one admission enquiry.
-     *
-     * GET:
-     * /api/admission/enquiries/{id}
-     */
-    public function show($id)
-    {
-        $enquiry = Enquiry::find($id);
+                'O' => 'Other',
+            ];
 
 
-        if (!$enquiry) {
-
-            return response()->json([
-
-                'success' => false,
-
-                'message' =>
-                    'Admission enquiry not found.',
-
-            ], 404);
-        }
-
-
-        $class = DB::table('class')
-            ->where(
-                'class_id',
-                $enquiry->class_id
-            )
-            ->first();
-
-
-        return response()->json([
-
-            'success' => true,
-
-            'data' => [
+            return [
 
                 'id' =>
                     $enquiry->id,
-
-                'enquiry_number' =>
-                    $enquiry->enquiry_number,
 
                 'first_name' =>
                     $enquiry->first_name,
@@ -432,18 +549,18 @@ class AdmissionEnquiryController extends Controller
                     $enquiry->last_name,
 
                 'dob' =>
-                    $enquiry->dob
-                        ? $enquiry->dob->format('Y-m-d')
-                        : null,
+                    $enquiry->dob,
 
                 'gender' =>
-                    $enquiry->gender,
+                    $genderMap[
+                        $enquiry->gender
+                    ] ?? $enquiry->gender,
 
-                'class_id' =>
-                    $enquiry->class_id,
-
-                'class_name' =>
-                    $class->name ?? null,
+                /*
+                 * Class is already stored as NAME.
+                 */
+                'class' =>
+                    $enquiry->class,
 
                 'father_name' =>
                     $enquiry->father_name,
@@ -466,17 +583,119 @@ class AdmissionEnquiryController extends Controller
                 'question' =>
                     $enquiry->question,
 
-                'source' =>
-                    $enquiry->source,
+                'created_at' =>
+                    $enquiry->created_at,
 
-                'status' =>
-                    $enquiry->status,
+                'updated_at' =>
+                    $enquiry->updated_at,
+            ];
+        });
 
-                'notes' =>
-                    $enquiry->notes,
 
-                'conversion_reference' =>
-                    $enquiry->conversion_reference,
+        return response()->json([
+
+            'success' => true,
+
+            'data' => [
+
+                'enquiries' =>
+                    $enquiries,
+
+            ]
+
+        ]);
+    }
+
+
+    /**
+     * Get single admission enquiry.
+     *
+     * GET:
+     * /api/admission/enquiries/{id}
+     */
+    public function show($id)
+    {
+        $enquiry = Enquiry::find($id);
+
+
+        if (!$enquiry) {
+
+            return response()->json([
+
+                'success' => false,
+
+                'message' =>
+                    'Admission enquiry not found.'
+
+            ], 404);
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Gender For Frontend
+        |--------------------------------------------------------------------------
+        */
+
+        $genderMap = [
+
+            'M' => 'Male',
+
+            'F' => 'Female',
+
+            'O' => 'Other',
+        ];
+
+
+        return response()->json([
+
+            'success' => true,
+
+            'data' => [
+
+                'id' =>
+                    $enquiry->id,
+
+                'first_name' =>
+                    $enquiry->first_name,
+
+                'last_name' =>
+                    $enquiry->last_name,
+
+                'dob' =>
+                    $enquiry->dob,
+
+                'gender' =>
+                    $genderMap[
+                        $enquiry->gender
+                    ] ?? $enquiry->gender,
+
+                /*
+                 * Class NAME.
+                 */
+                'class' =>
+                    $enquiry->class,
+
+                'father_name' =>
+                    $enquiry->father_name,
+
+                'mother_name' =>
+                    $enquiry->mother_name,
+
+                'contact_no' =>
+                    $enquiry->contact_no,
+
+                'email' =>
+                    $enquiry->email,
+
+                'current_school' =>
+                    $enquiry->current_school,
+
+                'all_documents_available' =>
+                    $enquiry->all_documents_available,
+
+                'question' =>
+                    $enquiry->question,
 
                 'created_at' =>
                     $enquiry->created_at,
