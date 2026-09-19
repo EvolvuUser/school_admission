@@ -15,16 +15,24 @@ class AdmissionDocumentTypeController extends Controller
      */
     public function index()
     {
-        $documentTypes = AdmissionDocumentType::where('is_active', 'Y')
+        $documentTypes = AdmissionDocumentType::where(
+                'is_active',
+                'Y'
+            )
             ->orderBy('id')
             ->get([
+                'id',
                 'code',
                 'name',
+                'is_active',
             ]);
 
         return response()->json([
             'success' => true,
-            'data' => $documentTypes,
+
+            'data' => [
+                'document_types' => $documentTypes,
+            ],
         ]);
     }
 }
