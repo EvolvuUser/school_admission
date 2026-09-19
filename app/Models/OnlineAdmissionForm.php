@@ -82,6 +82,7 @@ class OnlineAdmissionForm extends Model
         // Status
         'status',
         'admission_form_status',
+        'payment_status',
         'sms_sending_phone_no',
 
         // Other

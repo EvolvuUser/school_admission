@@ -11,12 +11,12 @@ use Carbon\Carbon;
 class AdmissionEnquiryController extends Controller
 {
     /**
-     * Get all classes for Admission Enquiry.
+     * ============================================================
+     * GET ALL CLASSES
+     * ============================================================
      *
      * GET:
      * /api/admission/enquiry/classes
-     *
-     * This returns ALL classes from the class table.
      */
     public function getClasses()
     {
@@ -36,41 +36,181 @@ class AdmissionEnquiryController extends Controller
             ]
         ]);
     }
+
+
     /**
- * Get gender options for Admission Enquiry.
- *
- * GET:
- * /api/admission/enquiry/genders
- */
-public function getGenders()
-{
-    $genders = DB::table('admission_form_field_options')
-        ->where('field_name', 'gender')
-        ->where('is_active', 'Y')
-        ->orderBy('display_order')
-        ->get([
-            'field_option_id',
-            'option_value'
+     * ============================================================
+     * GET GENDER OPTIONS
+     * ============================================================
+     *
+     * GET:
+     * /api/admission/enquiry/genders
+     */
+    public function getGenders()
+    {
+        $genders = DB::table('admission_form_field_options')
+            ->where('field_name', 'gender')
+            ->where('is_active', 'Y')
+            ->orderBy('display_order')
+            ->get([
+                'field_option_id',
+                'option_value'
+            ]);
+
+        return response()->json([
+            'success' => true,
+
+            'data' => [
+                'genders' => $genders
+            ]
         ]);
-
-    return response()->json([
-        'success' => true,
-
-        'data' => [
-            'genders' => $genders
-        ]
-    ]);
-}
+    }
 
 
     /**
-     * Create Admission Enquiry.
+     * ============================================================
+     * CREATE ADMISSION ENQUIRY
+     * ============================================================
      *
      * POST:
      * /api/admission/enquiries
      */
     public function store(Request $request)
     {
+        /*
+        |--------------------------------------------------------------------------
+        | Normalize Gender
+        |--------------------------------------------------------------------------
+        */
+
+        $genderInput = trim(
+            (string) $request->input('gender')
+        );
+
+        $genderNormalized = strtolower($genderInput);
+
+        $genderMap = [
+            'male'   => 'Male',
+            'female' => 'Female',
+            'other'  => 'Other',
+
+            'm' => 'Male',
+            'f' => 'Female',
+            'o' => 'Other',
+        ];
+
+        if (isset($genderMap[$genderNormalized])) {
+            $request->merge([
+                'gender' => $genderMap[$genderNormalized]
+            ]);
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Normalize Class
+        |--------------------------------------------------------------------------
+        */
+
+        if ($request->has('class')) {
+            $request->merge([
+                'class' => trim(
+                    (string) $request->input('class')
+                )
+            ]);
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Normalize String Fields
+        |--------------------------------------------------------------------------
+        */
+
+        foreach ([
+            'first_name',
+            'last_name',
+            'father_name',
+            'mother_name',
+            'contact_no',
+            'current_school',
+            'email',
+            'question'
+        ] as $field) {
+
+            if ($request->has($field)) {
+
+                $value = $request->input($field);
+
+                $request->merge([
+                    $field => is_string($value)
+                        ? trim($value)
+                        : $value
+                ]);
+            }
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Normalize All Documents Available
+        |--------------------------------------------------------------------------
+        |
+        | The API can accept:
+        |
+        | true
+        | false
+        |
+        | "Y"
+        | "N"
+        |
+        | 1
+        | 0
+        |
+        | "yes"
+        | "no"
+        |
+        | Internally we ALWAYS convert it to:
+        |
+        | Y
+        | N
+        |
+        */
+
+        if ($request->has('all_documents_available')) {
+
+            $documentsInput =
+                $request->input('all_documents_available');
+
+            if (
+                $documentsInput === true ||
+                $documentsInput === 1 ||
+                $documentsInput === '1' ||
+                strtolower((string) $documentsInput) === 'y' ||
+                strtolower((string) $documentsInput) === 'yes' ||
+                strtolower((string) $documentsInput) === 'true'
+            ) {
+
+                $request->merge([
+                    'all_documents_available' => 'Y'
+                ]);
+
+            } elseif (
+                $documentsInput === false ||
+                $documentsInput === 0 ||
+                $documentsInput === '0' ||
+                strtolower((string) $documentsInput) === 'n' ||
+                strtolower((string) $documentsInput) === 'no' ||
+                strtolower((string) $documentsInput) === 'false'
+            ) {
+
+                $request->merge([
+                    'all_documents_available' => 'N'
+                ]);
+            }
+        }
+
+
         /*
         |--------------------------------------------------------------------------
         | Validate Request
@@ -98,7 +238,8 @@ public function getGenders()
             ],
 
             'dob' => [
-                'required'
+                'required',
+                'string'
             ],
 
             'gender' => [
@@ -108,15 +249,7 @@ public function getGenders()
             ],
 
             /*
-             * IMPORTANT:
-             *
-             * Frontend sends:
-             *
-             * UKG
-             * Grade 1
-             * Grade 2
-             *
-             * NOT class_id.
+             * Frontend sends class name.
              */
             'class' => [
                 'required',
@@ -180,10 +313,20 @@ public function getGenders()
             |--------------------------------------------------------------------------
             | Documents
             |--------------------------------------------------------------------------
+            |
+            | IMPORTANT:
+            |
+            | Database stores:
+            |
+            | Y
+            | N
+            |
             */
 
             'all_documents_available' => [
-                'nullable'
+                'nullable',
+                'string',
+                'in:Y,N'
             ],
 
 
@@ -202,11 +345,8 @@ public function getGenders()
 
         /*
         |--------------------------------------------------------------------------
-        | Validate Parent Name
+        | At Least One Parent Name Required
         |--------------------------------------------------------------------------
-        |
-        | At least one parent name is required.
-        |
         */
 
         if (
@@ -215,12 +355,10 @@ public function getGenders()
         ) {
 
             return response()->json([
-
                 'success' => false,
 
                 'message' =>
                     'At least one parent name is required.'
-
             ], 422);
         }
 
@@ -230,39 +368,38 @@ public function getGenders()
         | Find Selected Class
         |--------------------------------------------------------------------------
         |
-        | The frontend sends the class NAME.
-        |
-        | Example:
+        | Frontend sends:
         |
         | "class": "UKG"
         |
-        | We verify that this class exists in the class table.
-        |
         */
 
-        $className = trim($validated['class']);
+        $className = trim(
+            $validated['class']
+        );
 
         $class = DB::table('class')
-            ->where('name', $className)
+            ->whereRaw(
+                'LOWER(name) = ?',
+                [strtolower($className)]
+            )
             ->first();
 
 
         if (!$class) {
 
             return response()->json([
-
                 'success' => false,
 
                 'message' =>
                     'Selected class not found.'
-
             ], 422);
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Convert Gender
+        | Convert Gender For Database
         |--------------------------------------------------------------------------
         |
         | Frontend:
@@ -279,33 +416,32 @@ public function getGenders()
         |
         */
 
-        $genderMap = [
-
-            'Male' => 'M',
-
+        $genderMapForDatabase = [
+            'Male'   => 'M',
             'Female' => 'F',
-
-            'Other' => 'O',
+            'Other'  => 'O',
         ];
 
-
-        $gender = $genderMap[
-            $validated['gender']
-        ];
+        $gender =
+            $genderMapForDatabase[
+                $validated['gender']
+            ];
 
 
         /*
         |--------------------------------------------------------------------------
-        | Convert Date of Birth
+        | Convert Date Of Birth
         |--------------------------------------------------------------------------
         |
         | Frontend:
         |
-        | 02/06/2024
+        | 06/02/2002
+        |
+        | MM/DD/YYYY
         |
         | Database:
         |
-        | 2024-02-06
+        | 2002-06-02
         |
         */
 
@@ -313,42 +449,88 @@ public function getGenders()
 
             $dob = Carbon::createFromFormat(
                 'm/d/Y',
-                $validated['dob']
+                trim($validated['dob'])
             )->format('Y-m-d');
 
         } catch (\Exception $e) {
 
             return response()->json([
-
                 'success' => false,
 
                 'message' =>
                     'Invalid date of birth. Please use MM/DD/YYYY format.'
-
             ], 422);
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Convert Documents Value
+        | Documents Value
         |--------------------------------------------------------------------------
         |
-        | Frontend may send:
+        | ALWAYS store:
         |
-        | true
-        | false
-        |
-        | or:
-        |
-        | "true"
-        | "false"
+        | Y
+        | N
         |
         */
 
-        $documentsAvailable = $request->boolean(
-            'all_documents_available'
-        );
+        $documentsAvailable =
+            $validated['all_documents_available'] ?? 'N';
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Generate Enquiry Number
+        |--------------------------------------------------------------------------
+        |
+        | Example:
+        |
+        | ENQ-2026-0001
+        | ENQ-2026-0002
+        | ENQ-2026-0003
+        |
+        */
+
+        $year = now()->format('Y');
+
+        $lastEnquiry = Enquiry::where(
+                'enquiry_number',
+                'like',
+                'ENQ-' . $year . '-%'
+            )
+            ->orderByDesc('id')
+            ->first();
+
+
+        if ($lastEnquiry) {
+
+            $lastNumber = (int) substr(
+                $lastEnquiry->enquiry_number,
+                strrpos(
+                    $lastEnquiry->enquiry_number,
+                    '-'
+                ) + 1
+            );
+
+            $nextNumber = $lastNumber + 1;
+
+        } else {
+
+            $nextNumber = 1;
+        }
+
+
+        $enquiryNumber =
+            'ENQ-' .
+            $year .
+            '-' .
+            str_pad(
+                $nextNumber,
+                4,
+                '0',
+                STR_PAD_LEFT
+            );
 
 
         /*
@@ -361,15 +543,29 @@ public function getGenders()
 
             /*
             |--------------------------------------------------------------------------
-            | Student
+            | Enquiry Number
+            |--------------------------------------------------------------------------
+            */
+
+            'enquiry_number' =>
+                $enquiryNumber,
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Student Details
             |--------------------------------------------------------------------------
             */
 
             'first_name' =>
-                trim($validated['first_name']),
+                trim(
+                    $validated['first_name']
+                ),
 
             'last_name' =>
-                trim($validated['last_name']),
+                trim(
+                    $validated['last_name']
+                ),
 
             'dob' =>
                 $dob,
@@ -383,17 +579,7 @@ public function getGenders()
             | Class
             |--------------------------------------------------------------------------
             |
-            | IMPORTANT:
-            |
-            | We save the CLASS NAME.
-            |
-            | Example:
-            |
-            | UKG
-            |
-            | NOT:
-            |
-            | 150
+            | Save class NAME.
             |
             */
 
@@ -403,7 +589,7 @@ public function getGenders()
 
             /*
             |--------------------------------------------------------------------------
-            | Parent
+            | Parent Details
             |--------------------------------------------------------------------------
             */
 
@@ -420,12 +606,14 @@ public function getGenders()
 
             /*
             |--------------------------------------------------------------------------
-            | Contact
+            | Contact Details
             |--------------------------------------------------------------------------
             */
 
             'contact_no' =>
-                trim($validated['contact_no']),
+                trim(
+                    $validated['contact_no']
+                ),
 
             'email' =>
                 $validated['email'] ?? null,
@@ -433,7 +621,7 @@ public function getGenders()
 
             /*
             |--------------------------------------------------------------------------
-            | School
+            | School Details
             |--------------------------------------------------------------------------
             */
 
@@ -447,10 +635,17 @@ public function getGenders()
             |--------------------------------------------------------------------------
             | Documents
             |--------------------------------------------------------------------------
+            |
+            | IMPORTANT:
+            |
+            | This is now CHAR(1) in database.
+            |
+            | Only Y or N will be stored.
+            |
             */
 
             'all_documents_available' =>
-                $documentsAvailable ? 'Y' : 'N',
+                $documentsAvailable,
 
 
             /*
@@ -466,7 +661,7 @@ public function getGenders()
 
         /*
         |--------------------------------------------------------------------------
-        | Response
+        | Success Response
         |--------------------------------------------------------------------------
         */
 
@@ -482,6 +677,9 @@ public function getGenders()
                 'id' =>
                     $enquiry->id,
 
+                'enquiry_number' =>
+                    $enquiry->enquiry_number,
+
                 'first_name' =>
                     $enquiry->first_name,
 
@@ -492,14 +690,16 @@ public function getGenders()
                     $enquiry->dob,
 
                 /*
-                 * Return frontend-friendly value.
+                 * Return frontend gender.
                  */
+
                 'gender' =>
                     $validated['gender'],
 
                 /*
                  * Return class NAME.
                  */
+
                 'class' =>
                     $enquiry->class,
 
@@ -517,6 +717,10 @@ public function getGenders()
 
                 'current_school' =>
                     $enquiry->current_school,
+
+                /*
+                 * Return Y/N.
+                 */
 
                 'all_documents_available' =>
                     $enquiry->all_documents_available,
@@ -533,88 +737,106 @@ public function getGenders()
 
 
     /**
-     * Get all admission enquiries.
+     * ============================================================
+     * GET ALL ADMISSION ENQUIRIES
+     * ============================================================
      *
      * GET:
      * /api/admission/enquiries
      */
     public function index()
     {
-        $enquiries = Enquiry::orderByDesc('id')
-            ->get();
+        $enquiries =
+            Enquiry::orderByDesc('id')
+                ->get();
 
 
         /*
         |--------------------------------------------------------------------------
-        | Convert Gender For Frontend
+        | Gender Mapping
         |--------------------------------------------------------------------------
         */
 
-        $enquiries->transform(function ($enquiry) {
-
-            $genderMap = [
-
-                'M' => 'Male',
-
-                'F' => 'Female',
-
-                'O' => 'Other',
-            ];
+        $genderMap = [
+            'M' => 'Male',
+            'F' => 'Female',
+            'O' => 'Other',
+        ];
 
 
-            return [
+        /*
+        |--------------------------------------------------------------------------
+        | Transform Response
+        |--------------------------------------------------------------------------
+        */
 
-                'id' =>
-                    $enquiry->id,
+        $enquiries->transform(
+            function ($enquiry) use ($genderMap) {
 
-                'first_name' =>
-                    $enquiry->first_name,
+                return [
 
-                'last_name' =>
-                    $enquiry->last_name,
+                    'id' =>
+                        $enquiry->id,
 
-                'dob' =>
-                    $enquiry->dob,
+                    'enquiry_number' =>
+                        $enquiry->enquiry_number,
 
-                'gender' =>
-                    $genderMap[
-                        $enquiry->gender
-                    ] ?? $enquiry->gender,
+                    'first_name' =>
+                        $enquiry->first_name,
 
-                /*
-                 * Class is already stored as NAME.
-                 */
-                'class' =>
-                    $enquiry->class,
+                    'last_name' =>
+                        $enquiry->last_name,
 
-                'father_name' =>
-                    $enquiry->father_name,
+                    'dob' =>
+                        $enquiry->dob,
 
-                'mother_name' =>
-                    $enquiry->mother_name,
+                    'gender' =>
+                        $genderMap[
+                            $enquiry->gender
+                        ] ?? $enquiry->gender,
 
-                'contact_no' =>
-                    $enquiry->contact_no,
+                    /*
+                     * Class name.
+                     */
 
-                'email' =>
-                    $enquiry->email,
+                    'class' =>
+                        $enquiry->class,
 
-                'current_school' =>
-                    $enquiry->current_school,
+                    'father_name' =>
+                        $enquiry->father_name,
 
-                'all_documents_available' =>
-                    $enquiry->all_documents_available,
+                    'mother_name' =>
+                        $enquiry->mother_name,
 
-                'question' =>
-                    $enquiry->question,
+                    'contact_no' =>
+                        $enquiry->contact_no,
 
-                'created_at' =>
-                    $enquiry->created_at,
+                    'email' =>
+                        $enquiry->email,
 
-                'updated_at' =>
-                    $enquiry->updated_at,
-            ];
-        });
+                    'current_school' =>
+                        $enquiry->current_school,
+
+                    /*
+                     * IMPORTANT:
+                     *
+                     * Return Y/N directly.
+                     */
+
+                    'all_documents_available' =>
+                        $enquiry->all_documents_available,
+
+                    'question' =>
+                        $enquiry->question,
+
+                    'created_at' =>
+                        $enquiry->created_at,
+
+                    'updated_at' =>
+                        $enquiry->updated_at,
+                ];
+            }
+        );
 
 
         return response()->json([
@@ -633,14 +855,17 @@ public function getGenders()
 
 
     /**
-     * Get single admission enquiry.
+     * ============================================================
+     * GET SINGLE ADMISSION ENQUIRY
+     * ============================================================
      *
      * GET:
      * /api/admission/enquiries/{id}
      */
     public function show($id)
     {
-        $enquiry = Enquiry::find($id);
+        $enquiry =
+            Enquiry::find($id);
 
 
         if (!$enquiry) {
@@ -681,6 +906,9 @@ public function getGenders()
                 'id' =>
                     $enquiry->id,
 
+                'enquiry_number' =>
+                    $enquiry->enquiry_number,
+
                 'first_name' =>
                     $enquiry->first_name,
 
@@ -698,6 +926,7 @@ public function getGenders()
                 /*
                  * Class NAME.
                  */
+
                 'class' =>
                     $enquiry->class,
 
@@ -715,6 +944,12 @@ public function getGenders()
 
                 'current_school' =>
                     $enquiry->current_school,
+
+                /*
+                 * IMPORTANT:
+                 *
+                 * Return Y/N directly.
+                 */
 
                 'all_documents_available' =>
                     $enquiry->all_documents_available,

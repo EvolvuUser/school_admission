@@ -341,13 +341,11 @@ public function paymentStatus(Request $request, $orderId)
                     'Status_desc' => $status,
                 ]);
 
-                // Update admission form status.
                 OnlineAdmissionForm::where(
                     'form_id',
                     $payment->form_id
                 )->update([
-                    'status' => 'S',
-                    'admission_form_status' => 'Payment Successful',
+                    'payment_status' => 'Success',
                 ]);
 
                 return $this->paymentRedirect([
@@ -369,13 +367,11 @@ public function paymentStatus(Request $request, $orderId)
                 'Status_desc' => $status ?: 'Payment Failed',
             ]);
 
-            // Update admission form status.
             OnlineAdmissionForm::where(
                 'form_id',
                 $payment->form_id
             )->update([
-                'status' => 'F',
-                'admission_form_status' => 'Payment Failed',
+                'payment_status' => 'Failed',
             ]);
 
             return $this->paymentRedirect([
