@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\AdmissionUploadDocument;
 use App\Models\OnlineAdmissionForm;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Support\Facades\DB;
 
 class OnlineAdmissionFormController extends Controller
 {
@@ -29,7 +31,7 @@ class OnlineAdmissionFormController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Find Admission Form Using form_id
+        | Find Admission Form
         |--------------------------------------------------------------------------
         */
 
@@ -38,14 +40,12 @@ class OnlineAdmissionFormController extends Controller
             $formId
         )->first();
 
-
         if (!$student) {
             return response()->json([
                 'success' => false,
                 'message' => 'Online admission form not found.'
             ], 404);
         }
-
 
         /*
         |--------------------------------------------------------------------------
@@ -53,8 +53,10 @@ class OnlineAdmissionFormController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
-
+        if (
+            (int) $student->nar_id !==
+            (int) $validated['nar_id']
+        ) {
             return response()->json([
                 'success' => false,
                 'message' =>
@@ -62,29 +64,41 @@ class OnlineAdmissionFormController extends Controller
             ], 403);
         }
 
-
         /*
         |--------------------------------------------------------------------------
-        | Success Response
+        | Get Uploaded Documents
         |--------------------------------------------------------------------------
         */
 
-        $documents = AdmissionUploadDocument::where('form_id', $student->form_id)
+        $documents = AdmissionUploadDocument::where(
+            'form_id',
+            $student->form_id
+        )
             ->get()
             ->map(function ($document) {
+
                 $document->document_url = asset(
-                    'storage/admission_documents/' . $document->image_name
+                    'storage/admission_documents/' .
+                    $document->image_name
                 );
 
                 return $document;
             });
 
+        /*
+        |--------------------------------------------------------------------------
+        | Response
+        |--------------------------------------------------------------------------
+        */
+
         return response()->json([
             'success' => true,
+
             'data' => [
                 'application' => $student,
                 'documents' => $documents,
             ],
+
             'form_id' => $student->form_id,
             'nar_id' => $student->nar_id,
         ]);
@@ -92,25 +106,41 @@ class OnlineAdmissionFormController extends Controller
 
 
     /**
-     * Get all online admission forms.
+     * Get all online admission forms for a nar_id.
      *
      * GET:
-     * /api/admission/online-forms
-     *
-     * NOTE:
-     * This endpoint is currently not protected by nar_id.
-     * We will handle that separately when implementing
-     * complete ownership/security.
+     * /api/admission/online-forms?nar_id=2856
      */
     public function index(Request $request)
     {
+        /*
+        |--------------------------------------------------------------------------
+        | Validate nar_id
+        |--------------------------------------------------------------------------
+        */
+
         $validated = $request->validate([
             'nar_id' => 'required|integer',
         ]);
 
-        $students = OnlineAdmissionForm::where('nar_id', $validated['nar_id'])
+        /*
+        |--------------------------------------------------------------------------
+        | Get Forms
+        |--------------------------------------------------------------------------
+        */
+
+        $students = OnlineAdmissionForm::where(
+            'nar_id',
+            $validated['nar_id']
+        )
             ->orderByDesc('adm_form_pk')
             ->get();
+
+        /*
+        |--------------------------------------------------------------------------
+        | Response
+        |--------------------------------------------------------------------------
+        */
 
         return response()->json([
             'success' => true,
@@ -118,152 +148,254 @@ class OnlineAdmissionFormController extends Controller
         ]);
     }
 
+
     /**
      * Download a saved online admission form as PDF.
      *
      * GET:
      * /api/admission/online-form/{formId}/download?nar_id=2856
+     *
+     * PDF Template:
+     * resources/views/admission/online-form-pdf.blade.php
      */
     public function download(Request $request, $formId)
     {
+        /*
+        |--------------------------------------------------------------------------
+        | Get nar_id
+        |--------------------------------------------------------------------------
+        |
+        | Supports:
+        |
+        | ?nar_id=2856
+        |
+        | JSON:
+        | {
+        |     "nar_id": 2856
+        | }
+        |
+        | Also supports narId for frontend compatibility.
+        |
+        */
+
         $request->merge([
-            'nar_id' => $request->query('nar_id', $request->input('nar_id', $request->input('narId'))),
+            'nar_id' => $request->query(
+                'nar_id',
+                $request->input(
+                    'nar_id',
+                    $request->input('narId')
+                )
+            ),
         ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Validate nar_id
+        |--------------------------------------------------------------------------
+        */
 
         $validated = $request->validate([
             'nar_id' => 'required|integer',
         ]);
 
-        $student = OnlineAdmissionForm::where('form_id', $formId)->first();
+        /*
+        |--------------------------------------------------------------------------
+        | Find Admission Form
+        |--------------------------------------------------------------------------
+        */
+
+        $student = OnlineAdmissionForm::where(
+            'form_id',
+            $formId
+        )->first();
 
         if (!$student) {
             return response()->json([
                 'success' => false,
-                'message' => 'Online admission form not found.'
+                'message' =>
+                    'Online admission form not found.'
             ], 404);
         }
 
-        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
+        /*
+        |--------------------------------------------------------------------------
+        | Ownership Check
+        |--------------------------------------------------------------------------
+        |
+        | The form can only be downloaded by the nar_id
+        | to which the form belongs.
+        |
+        */
+
+        if (
+            (int) $student->nar_id !==
+            (int) $validated['nar_id']
+        ) {
             return response()->json([
                 'success' => false,
-                'message' => 'You are not authorized to access this admission form.'
+                'message' =>
+                    'You are not authorized to download this admission form.'
             ], 403);
         }
 
-        $documents = AdmissionUploadDocument::where('form_id', $student->form_id)
+        /*
+        |--------------------------------------------------------------------------
+        | Get Uploaded Documents
+        |--------------------------------------------------------------------------
+        */
+
+        $documents = AdmissionUploadDocument::where(
+            'form_id',
+            $student->form_id
+        )
             ->orderBy('doc_type')
             ->get();
 
-        $pdfBinary = $this->generatePdf($student, $documents);
+        /*
+        |--------------------------------------------------------------------------
+        | Get Class Name
+        |--------------------------------------------------------------------------
+        |
+        | online_admission_form stores class_id.
+        |
+        | The PDF should display:
+        |
+        |     UKG
+        |
+        | instead of:
+        |
+        |     150
+        |
+        */
 
-        return response($pdfBinary, 200)
-            ->header('Content-Type', 'application/pdf')
-            ->header('Content-Disposition', 'attachment; filename="' . $formId . '-admission-form.pdf"')
-            ->header('Cache-Control', 'no-cache, no-store, must-revalidate')
-            ->header('Pragma', 'no-cache')
-            ->header('Expires', '0');
-    }
+        $class = DB::table('class')
+            ->where(
+                'class_id',
+                $student->class_id
+            )
+            ->first();
 
-    private function generatePdf($student, $documents)
-    {
-        $title = 'Admission Form - ' . $student->form_id;
-        $lines = [
-            'Evolvu Smart School',
-            'Online Admission Form',
-            '',
-            'Form No: ' . ($student->form_id ?? 'N/A'),
-            'Student Name: ' . trim(($student->first_name ?? '') . ' ' . ($student->middle_name ?? '') . ' ' . ($student->last_name ?? '')),
-            'Class: ' . ($student->class_id ?? 'N/A'),
-            'Academic Year: ' . ($student->academic_yr ?? 'N/A'),
-            'Status: ' . ($student->status ?? 'N/A'),
-            '',
-            'Student Profile',
-            'DOB: ' . ($student->dob ?? 'N/A'),
-            'Gender: ' . ($student->gender ?? 'N/A'),
-            'Religion: ' . ($student->religion ?? 'N/A'),
-            'Caste: ' . ($student->caste ?? 'N/A'),
-            'Nationality: ' . ($student->nationality ?? 'N/A'),
-            'Mother Tongue: ' . ($student->mother_tongue ?? 'N/A'),
-            '',
-            'Parent Profile',
-            'Father Name: ' . ($student->father_name ?? 'N/A'),
-            'Father Mobile: ' . ($student->f_mobile ?? 'N/A'),
-            'Father Email: ' . ($student->f_email ?? 'N/A'),
-            'Mother Name: ' . ($student->mother_name ?? 'N/A'),
-            'Mother Mobile: ' . ($student->m_mobile ?? 'N/A'),
-            'Mother Email: ' . ($student->m_emailid ?? 'N/A'),
-            '',
-            'Address',
-            'Locality: ' . ($student->locality ?? 'N/A'),
-            'City: ' . ($student->city ?? 'N/A'),
-            'State: ' . ($student->state ?? 'N/A'),
-            'Pincode: ' . ($student->pincode ?? 'N/A'),
-            'Permanent Address: ' . ($student->perm_address ?? 'N/A'),
-            '',
-            'Declaration',
-            'I affirm that the information provided above is true and correct to the best of my knowledge.',
-            '',
-            'Uploaded Documents',
+        $className = $class
+            ? $class->name
+            : $student->class_id;
+
+        /*
+        |--------------------------------------------------------------------------
+        | Convert Application Status
+        |--------------------------------------------------------------------------
+        |
+        | Do not display raw database codes such as:
+        |
+        |     S
+        |
+        | Display:
+        |
+        |     Applied
+        |
+        */
+
+        $status = $student->admission_form_status;
+
+        if (!$status) {
+            $status = $student->status;
+        }
+
+        $statusMap = [
+            'S' => 'Applied',
+            'A' => 'Applied',
+            'Applied' => 'Applied',
+
+            'D' => 'Draft',
+            'Draft' => 'Draft',
+
+            'C' => 'Cancelled',
+            'Cancelled' => 'Cancelled',
+
+            'Approved' => 'Approved',
+            'Rejected' => 'Rejected',
         ];
 
-        if ($documents->isEmpty()) {
-            $lines[] = 'No uploaded documents found.';
-        } else {
-            foreach ($documents as $document) {
-                $label = $document->doc_type ?? 'DOC';
-                $lines[] = '- ' . $label . ': ' . ($document->image_name ?? 'Uploaded');
-            }
+        $displayStatus = $statusMap[$status]
+            ?? $status
+            ?? 'N/A';
+
+        /*
+        |--------------------------------------------------------------------------
+        | School Logo
+        |--------------------------------------------------------------------------
+        |
+        | Your logo is inside:
+        |
+        | public/images/school/
+        |
+        | Based on the file currently shown in VS Code:
+        |
+        | logo.jpg.jpeg
+        |
+        */
+
+        $logoPath = public_path(
+            'images/school/logo.jpg.jpeg'
+        );
+
+        /*
+        |--------------------------------------------------------------------------
+        | Check Logo Exists
+        |--------------------------------------------------------------------------
+        */
+
+        if (!file_exists($logoPath)) {
+            $logoPath = null;
         }
 
-        $lines[] = '';
-        $lines[] = 'For Office Use';
-        $lines[] = 'Admitted / Not Admitted: ____________________';
-        $lines[] = 'Class: ____________________';
-        $lines[] = 'W.E.F.: ____________________';
-        $lines[] = 'Principal Signature: ____________________';
+        /*
+        |--------------------------------------------------------------------------
+        | Generate PDF From Blade Template
+        |--------------------------------------------------------------------------
+        |
+        | Blade:
+        |
+        | resources/views/admission/online-form-pdf.blade.php
+        |
+        | DomPDF converts the HTML/CSS into a real PDF.
+        |
+        */
 
-        $content = "BT\n/F1 18 Tf\n50 800 Td\n(" . $this->escapePdfText($title) . ") Tj\nET\n";
+        $pdf = Pdf::loadView(
+            'admission.online-form-pdf',
+            [
+                'student' => $student,
 
-        $y = 760;
-        foreach ($lines as $line) {
-            $content .= "BT\n/F1 11 Tf\n50 $y Td\n(" . $this->escapePdfText($line) . ") Tj\nET\n";
-            $y -= 18;
-            if ($y < 80) {
-                break;
-            }
-        }
+                'documents' => $documents,
 
-        $objects = [];
-        $objects[] = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
-        $objects[] = "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
-        $objects[] = "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n";
-        $objects[] = "4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n";
-        $objects[] = "5 0 obj\n<< /Length " . strlen($content) . " >>\nstream\n" . $content . "endstream\nendobj\n";
+                'className' => $className,
 
-        $pdf = "%PDF-1.4\n";
-        $offsets = [0];
-        foreach ($objects as $object) {
-            $offsets[] = strlen($pdf);
-            $pdf .= $object;
-        }
+                'displayStatus' => $displayStatus,
 
-        $xrefStart = strlen($pdf);
-        $pdf .= "xref\n0 6\n0000000000 65535 f \n";
-        for ($i = 1; $i < count($offsets); $i++) {
-            $pdf .= sprintf('%010d 00000 n \n', $offsets[$i]);
-        }
+                'logoPath' => $logoPath,
+            ]
+        );
 
-        $pdf .= "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" . $xrefStart . "\n%%EOF";
+        /*
+        |--------------------------------------------------------------------------
+        | A4 Portrait
+        |--------------------------------------------------------------------------
+        */
 
-        return $pdf;
-    }
+        $pdf->setPaper(
+            'a4',
+            'portrait'
+        );
 
-    private function escapePdfText($text)
-    {
-        return str_replace(
-            ['\\', '(', ')'],
-            ['\\\\', '\\(', '\\)'],
-            (string) $text
+        /*
+        |--------------------------------------------------------------------------
+        | Download PDF
+        |--------------------------------------------------------------------------
+        */
+
+        return $pdf->download(
+            $student->form_id .
+            '-admission-form.pdf'
         );
     }
 
@@ -278,7 +410,7 @@ class OnlineAdmissionFormController extends Controller
     {
         /*
         |--------------------------------------------------------------------------
-        | Validate nar_id
+        | Validate Request
         |--------------------------------------------------------------------------
         */
 
@@ -291,7 +423,6 @@ class OnlineAdmissionFormController extends Controller
             */
 
             'nar_id' => 'required|integer',
-
 
             /*
             |--------------------------------------------------------------------------
@@ -335,7 +466,6 @@ class OnlineAdmissionFormController extends Controller
             'category' =>
                 'sometimes|required|string|max:8',
 
-
             /*
             |--------------------------------------------------------------------------
             | Address Details
@@ -357,7 +487,6 @@ class OnlineAdmissionFormController extends Controller
             'perm_address' =>
                 'sometimes|required|string|max:100',
 
-
             /*
             |--------------------------------------------------------------------------
             | Sibling Details
@@ -372,7 +501,6 @@ class OnlineAdmissionFormController extends Controller
 
             'sibling_student_id' =>
                 'nullable|string|max:100',
-
 
             /*
             |--------------------------------------------------------------------------
@@ -407,7 +535,6 @@ class OnlineAdmissionFormController extends Controller
             'f_aadhar_no' =>
                 'nullable|string|max:14',
 
-
             /*
             |--------------------------------------------------------------------------
             | Mother Details
@@ -441,7 +568,6 @@ class OnlineAdmissionFormController extends Controller
             'm_aadhar_no' =>
                 'nullable|string|max:14',
 
-
             /*
             |--------------------------------------------------------------------------
             | Additional Details
@@ -460,7 +586,6 @@ class OnlineAdmissionFormController extends Controller
             'acheivements' =>
                 'nullable|string|max:100',
 
-
             /*
             |--------------------------------------------------------------------------
             | Parent Contribution
@@ -474,34 +599,64 @@ class OnlineAdmissionFormController extends Controller
                 'nullable|string|max:50',
         ]);
 
+        /*
+        |--------------------------------------------------------------------------
+        | Convert Gender
+        |--------------------------------------------------------------------------
+        */
+
         if (isset($validated['gender'])) {
-            $validated['gender'] = match (strtolower(trim($validated['gender']))) {
+
+            $validated['gender'] = match (
+                strtolower(trim($validated['gender']))
+            ) {
+
                 'male' => 'M',
+
                 'female' => 'F',
+
                 'other' => 'O',
-                default => strtoupper(substr(trim($validated['gender']), 0, 1)),
+
+                default => strtoupper(
+                    substr(
+                        trim($validated['gender']),
+                        0,
+                        1
+                    )
+                ),
             };
         }
-
-        if (isset($validated['sibling'])) {
-            $validated['sibling'] = match (strtolower(trim($validated['sibling']))) {
-                'yes' => 'Y',
-                'no' => 'N',
-                default => strtoupper(substr(trim($validated['sibling']), 0, 1)),
-            };
-        }
-
 
         /*
         |--------------------------------------------------------------------------
-        | Find Existing Application Using form_id
+        | Convert Sibling
         |--------------------------------------------------------------------------
-        |
-        | IMPORTANT:
-        | The API URL uses form_id.
-        | We should NOT use OnlineAdmissionForm::find($formId)
-        | because find() searches the primary key adm_form_pk.
-        |
+        */
+
+        if (isset($validated['sibling'])) {
+
+            $validated['sibling'] = match (
+                strtolower(trim($validated['sibling']))
+            ) {
+
+                'yes' => 'Y',
+
+                'no' => 'N',
+
+                default => strtoupper(
+                    substr(
+                        trim($validated['sibling']),
+                        0,
+                        1
+                    )
+                ),
+            };
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | Find Existing Application
+        |--------------------------------------------------------------------------
         */
 
         $student = OnlineAdmissionForm::where(
@@ -509,8 +664,8 @@ class OnlineAdmissionFormController extends Controller
             $formId
         )->first();
 
-
         if (!$student) {
+
             return response()->json([
                 'success' => false,
                 'message' =>
@@ -518,14 +673,16 @@ class OnlineAdmissionFormController extends Controller
             ], 404);
         }
 
-
         /*
         |--------------------------------------------------------------------------
         | Ownership Check
         |--------------------------------------------------------------------------
         */
 
-        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
+        if (
+            (int) $student->nar_id !==
+            (int) $validated['nar_id']
+        ) {
 
             return response()->json([
                 'success' => false,
@@ -534,19 +691,13 @@ class OnlineAdmissionFormController extends Controller
             ], 403);
         }
 
-
         /*
         |--------------------------------------------------------------------------
-        | Remove nar_id Before Updating
+        | Do Not Allow nar_id To Be Changed
         |--------------------------------------------------------------------------
-        |
-        | nar_id is only used for ownership verification.
-        | It must NOT be changed by the update request.
-        |
         */
 
         unset($validated['nar_id']);
-
 
         /*
         |--------------------------------------------------------------------------
@@ -599,25 +750,24 @@ class OnlineAdmissionFormController extends Controller
             'other_area',
         ];
 
-
         foreach ($validated as $key => $value) {
 
             if (
                 is_string($value) &&
                 in_array($key, $uppercaseFields)
             ) {
+
                 $validated[$key] =
                     strtoupper(trim($value));
             }
         }
-
 
         /*
         |--------------------------------------------------------------------------
         | Update Student Details
         |--------------------------------------------------------------------------
         |
-        | We intentionally do NOT update:
+        | These values are intentionally NOT changed:
         |
         | form_id
         | academic_yr
@@ -628,7 +778,6 @@ class OnlineAdmissionFormController extends Controller
 
         $student->update($validated);
 
-
         /*
         |--------------------------------------------------------------------------
         | Set Application Status
@@ -638,7 +787,6 @@ class OnlineAdmissionFormController extends Controller
         $student->admission_form_status = 'Applied';
 
         $student->save();
-
 
         /*
         |--------------------------------------------------------------------------
@@ -655,12 +803,6 @@ class OnlineAdmissionFormController extends Controller
 
             'data' => [
 
-                /*
-                |--------------------------------------------------------------------------
-                | Application Information
-                |--------------------------------------------------------------------------
-                */
-
                 'adm_form_pk' =>
                     $student->adm_form_pk,
 
@@ -675,13 +817,6 @@ class OnlineAdmissionFormController extends Controller
 
                 'class_id' =>
                     $student->class_id,
-
-
-                /*
-                |--------------------------------------------------------------------------
-                | Student Details
-                |--------------------------------------------------------------------------
-                */
 
                 'first_name' =>
                     $student->first_name,
@@ -719,13 +854,6 @@ class OnlineAdmissionFormController extends Controller
                 'category' =>
                     $student->category,
 
-
-                /*
-                |--------------------------------------------------------------------------
-                | Address Details
-                |--------------------------------------------------------------------------
-                */
-
                 'locality' =>
                     $student->locality,
 
@@ -741,13 +869,6 @@ class OnlineAdmissionFormController extends Controller
                 'perm_address' =>
                     $student->perm_address,
 
-
-                /*
-                |--------------------------------------------------------------------------
-                | Sibling Details
-                |--------------------------------------------------------------------------
-                */
-
                 'sibling' =>
                     $student->sibling,
 
@@ -756,13 +877,6 @@ class OnlineAdmissionFormController extends Controller
 
                 'sibling_student_id' =>
                     $student->sibling_student_id,
-
-
-                /*
-                |--------------------------------------------------------------------------
-                | Father Details
-                |--------------------------------------------------------------------------
-                */
 
                 'father_name' =>
                     $student->father_name,
@@ -791,13 +905,6 @@ class OnlineAdmissionFormController extends Controller
                 'f_aadhar_no' =>
                     $student->f_aadhar_no,
 
-
-                /*
-                |--------------------------------------------------------------------------
-                | Mother Details
-                |--------------------------------------------------------------------------
-                */
-
                 'mother_name' =>
                     $student->mother_name,
 
@@ -825,13 +932,6 @@ class OnlineAdmissionFormController extends Controller
                 'm_aadhar_no' =>
                     $student->m_aadhar_no,
 
-
-                /*
-                |--------------------------------------------------------------------------
-                | Additional Details
-                |--------------------------------------------------------------------------
-                */
-
                 'stud_aadhar' =>
                     $student->stud_aadhar,
 
@@ -844,25 +944,11 @@ class OnlineAdmissionFormController extends Controller
                 'acheivements' =>
                     $student->acheivements,
 
-
-                /*
-                |--------------------------------------------------------------------------
-                | Parent Contribution
-                |--------------------------------------------------------------------------
-                */
-
                 'area_in_which_parent_can_contribute' =>
                     $student->area_in_which_parent_can_contribute,
 
                 'other_area' =>
                     $student->other_area,
-
-
-                /*
-                |--------------------------------------------------------------------------
-                | Status
-                |--------------------------------------------------------------------------
-                */
 
                 'admission_form_status' =>
                     $student->admission_form_status,
@@ -889,10 +975,9 @@ class OnlineAdmissionFormController extends Controller
             'nar_id' => 'required|integer',
         ]);
 
-
         /*
         |--------------------------------------------------------------------------
-        | Find Admission Form Using form_id
+        | Find Admission Form
         |--------------------------------------------------------------------------
         */
 
@@ -901,8 +986,8 @@ class OnlineAdmissionFormController extends Controller
             $formId
         )->first();
 
-
         if (!$student) {
+
             return response()->json([
                 'success' => false,
                 'message' =>
@@ -910,14 +995,16 @@ class OnlineAdmissionFormController extends Controller
             ], 404);
         }
 
-
         /*
         |--------------------------------------------------------------------------
         | Ownership Check
         |--------------------------------------------------------------------------
         */
 
-        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
+        if (
+            (int) $student->nar_id !==
+            (int) $validated['nar_id']
+        ) {
 
             return response()->json([
                 'success' => false,
@@ -925,7 +1012,6 @@ class OnlineAdmissionFormController extends Controller
                     'You are not authorized to delete this admission form.'
             ], 403);
         }
-
 
         /*
         |--------------------------------------------------------------------------
@@ -935,10 +1021,9 @@ class OnlineAdmissionFormController extends Controller
 
         $student->delete();
 
-
         /*
         |--------------------------------------------------------------------------
-        | Success Response
+        | Response
         |--------------------------------------------------------------------------
         */
 

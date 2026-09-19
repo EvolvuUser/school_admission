@@ -3,42 +3,149 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
+use App\Models\AdmissionDocumentType;
 use App\Models\AdmissionUploadDocument;
 use App\Models\OnlineAdmissionForm;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
 class AdmissionDocumentController extends Controller
 {
     /**
-     * Supported document types.
+     * Get all active document types.
+     *
+     * Document types are stored in:
+     *
+     * admission_document_types
+     *
+     * Nothing is hardcoded here.
      */
-    private const DOCUMENT_TYPES = [
-        'BC'   => 'Birth Certificate',
-        'PS'   => 'Student Photo',
-        'FP'   => 'Family Photo',
-        'SC'   => 'Student Certificate / Bonafide Certificate',
-        'BPSC' => 'Baptism Certificate',
-        'AC'   => 'Aadhar Card',
-        'CC'   => 'Caste Certificate',
-        'PC'   => 'Parent Aadhar Card',
-    ];
+    private function getDocumentTypes()
+    {
+        return AdmissionDocumentType::where('is_active', 'Y')
+            ->orderBy('id')
+            ->get();
+    }
+
+
+    /**
+     * Find an active document type by code.
+     *
+     * Example:
+     *
+     * BC
+     * PS
+     * FP
+     *
+     * The code is checked against:
+     *
+     * admission_document_types
+     */
+    private function findDocumentType($code)
+    {
+        return AdmissionDocumentType::where(
+            'code',
+            strtoupper(trim($code))
+        )
+            ->where('is_active', 'Y')
+            ->first();
+    }
+
+
+    /**
+     * Get active document types API.
+     *
+     * GET:
+     *
+     * /api/admission/document-types
+     *
+     * Example response:
+     *
+     * {
+     *     "success": true,
+     *     "data": {
+     *         "document_types": [
+     *             {
+     *                 "id": 1,
+     *                 "code": "BC",
+     *                 "name": "Birth Certificate",
+     *                 "is_active": "Y"
+     *             }
+     *         ]
+     *     }
+     * }
+     */
+    public function documentTypes()
+    {
+        $documentTypes = $this->getDocumentTypes()
+            ->map(function ($documentType) {
+
+                return [
+                    'id' => $documentType->id,
+
+                    'code' => $documentType->code,
+
+                    'name' => $documentType->name,
+
+                    'is_active' => $documentType->is_active,
+                ];
+            })
+            ->values();
+
+
+        return response()->json([
+            'success' => true,
+
+            'data' => [
+                'document_types' => $documentTypes,
+            ]
+        ]);
+    }
 
 
     /**
      * Upload admission document.
      *
      * POST:
+     *
      * /api/admission/online-form/{formId}/documents
      *
      * Content-Type:
+     *
      * multipart/form-data
+     *
+     * Required:
+     *
+     * nar_id
+     * doc_type
+     * document
      */
     public function upload(Request $request, $formId)
     {
+        /*
+        |--------------------------------------------------------------------------
+        | Validate basic request
+        |--------------------------------------------------------------------------
+        */
+
         $validated = $request->validate([
-            'nar_id' => 'required|integer',
-            'doc_type' => 'required|string|in:BC,PS,FP,SC,BPSC,AC,CC,PC',
+
+            'nar_id' => [
+                'required',
+                'integer'
+            ],
+
+            /*
+             * Do NOT use "in:BC,PS,FP..." here.
+             *
+             * Document types are dynamic and come from
+             * admission_document_types.
+             */
+            'doc_type' => [
+                'required',
+                'string',
+                'max:20'
+            ],
 
             'document' => [
                 'required',
@@ -48,36 +155,102 @@ class AdmissionDocumentController extends Controller
             ],
         ]);
 
+
         /*
         |--------------------------------------------------------------------------
         | Check admission form
         |--------------------------------------------------------------------------
         */
 
-        $student = OnlineAdmissionForm::where('form_id', $formId)->first();
+        $student = OnlineAdmissionForm::where(
+            'form_id',
+            $formId
+        )->first();
+
 
         if (!$student) {
+
             return response()->json([
+
                 'success' => false,
-                'message' => 'Online admission form not found.'
+
+                'message' =>
+                    'Online admission form not found.'
+
             ], 404);
         }
 
-        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
+
+        /*
+        |--------------------------------------------------------------------------
+        | Check authorization
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            (int) $student->nar_id !==
+            (int) $validated['nar_id']
+        ) {
+
             return response()->json([
+
                 'success' => false,
-                'message' => 'You are not authorized to access this admission form.'
+
+                'message' =>
+                    'You are not authorized to access this admission form.'
+
             ], 403);
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Validate request
+        | Normalize document type
         |--------------------------------------------------------------------------
         */
 
-        $docType = strtoupper($validated['doc_type']);
+        $docType = strtoupper(
+            trim($validated['doc_type'])
+        );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Find document type from database
+        |--------------------------------------------------------------------------
+        |
+        | Example:
+        |
+        | admission_document_types
+        |
+        | BC -> Birth Certificate
+        | PS -> Student Photo
+        |
+        */
+
+        $documentType = $this->findDocumentType(
+            $docType
+        );
+
+
+        if (!$documentType) {
+
+            return response()->json([
+
+                'success' => false,
+
+                'message' =>
+                    'Invalid or inactive document type.'
+
+            ], 422);
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Get uploaded file
+        |--------------------------------------------------------------------------
+        */
 
         $document = $request->file('document');
 
@@ -87,23 +260,45 @@ class AdmissionDocumentController extends Controller
         | Check duplicate document
         |--------------------------------------------------------------------------
         |
-        | Only one document of each type is allowed for one admission form.
+        | Only one document of each type is allowed
+        | for one admission form.
         |
         */
 
-        $existingDocument = AdmissionUploadDocument::where('form_id', $formId)
-            ->where('doc_type', $docType)
+        $existingDocument =
+            AdmissionUploadDocument::where(
+                'form_id',
+                $formId
+            )
+            ->where(
+                'doc_type',
+                $documentType->code
+            )
             ->first();
 
+
         if ($existingDocument) {
+
             return response()->json([
+
                 'success' => false,
-                'message' => 'A ' . self::DOCUMENT_TYPES[$docType] .
+
+                'message' =>
+                    $documentType->name .
                     ' has already been uploaded for this admission form.',
+
                 'data' => [
-                    'doc_type' => $docType,
-                    'image_name' => $existingDocument->image_name,
+
+                    'doc_type' =>
+                        $documentType->code,
+
+                    'document_type' =>
+                        $documentType->name,
+
+                    'image_name' =>
+                        $existingDocument->image_name,
                 ]
+
             ], 409);
         }
 
@@ -112,39 +307,63 @@ class AdmissionDocumentController extends Controller
         |--------------------------------------------------------------------------
         | Generate file name
         |--------------------------------------------------------------------------
-        |
-        | Example:
-        |
-        | ABC-2026-X-1234_bc_birth_certificate.pdf
-        |
         */
 
         $originalName = pathinfo(
+
             $document->getClientOriginalName(),
+
             PATHINFO_FILENAME
         );
 
+
         /*
-        | Remove unwanted characters from original filename.
+        |--------------------------------------------------------------------------
+        | Clean original file name
+        |--------------------------------------------------------------------------
         */
+
         $originalName = preg_replace(
+
             '/[^A-Za-z0-9_-]/',
+
             '_',
+
             $originalName
         );
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | File extension
+        |--------------------------------------------------------------------------
+        */
+
         $extension = strtolower(
+
             $document->getClientOriginalExtension()
         );
 
 
-        $fileName = $formId
-            . '_'
-            . strtolower($docType)
-            . '_'
-            . $originalName
-            . '.'
-            . $extension;
+        /*
+        |--------------------------------------------------------------------------
+        | Final file name
+        |--------------------------------------------------------------------------
+        |
+        | Example:
+        |
+        | 2026-27-GRADE-1-0001_bc_birth_certificate.pdf
+        |
+        */
+
+        $fileName =
+            $formId .
+            '_' .
+            strtolower($documentType->code) .
+            '_' .
+            $originalName .
+            '.' .
+            $extension;
 
 
         /*
@@ -154,8 +373,11 @@ class AdmissionDocumentController extends Controller
         */
 
         $filePath = $document->storeAs(
+
             'admission_documents',
+
             $fileName,
+
             'public'
         );
 
@@ -167,9 +389,15 @@ class AdmissionDocumentController extends Controller
         */
 
         $upload = AdmissionUploadDocument::create([
-            'form_id' => $formId,
-            'doc_type' => $docType,
-            'image_name' => $fileName,
+
+            'form_id' =>
+                $formId,
+
+            'doc_type' =>
+                $documentType->code,
+
+            'image_name' =>
+                $fileName,
         ]);
 
 
@@ -179,7 +407,9 @@ class AdmissionDocumentController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $student->admission_form_status = 'Document Submitted';
+        $student->admission_form_status =
+            'Document Submitted';
+
         $student->save();
 
 
@@ -190,42 +420,71 @@ class AdmissionDocumentController extends Controller
         */
 
         return response()->json([
+
             'success' => true,
 
-            'message' => self::DOCUMENT_TYPES[$docType]
-                . ' uploaded successfully.',
+            'message' =>
+                $documentType->name .
+                ' uploaded successfully.',
 
             'data' => [
-                'form_id' => $upload->form_id,
 
-                'doc_type' => $upload->doc_type,
+                'form_id' =>
+                    $upload->form_id,
 
-                'document_type' => self::DOCUMENT_TYPES[$docType],
+                'doc_type' =>
+                    $upload->doc_type,
 
-                'image_name' => $upload->image_name,
+                'document_type' =>
+                    $documentType->name,
 
-                'file_path' => $filePath,
+                'image_name' =>
+                    $upload->image_name,
 
-                'document_url' => asset(
-                    'storage/' . $filePath
-                ),
+                'file_path' =>
+                    $filePath,
+
+                'document_url' =>
+                    asset(
+                        'storage/' . $filePath
+                    ),
 
                 'admission_form_status' =>
                     $student->admission_form_status,
             ]
+
         ], 201);
     }
 
 
     /**
-     * Get all documents for an admission form.
+     * Get all uploaded documents for an admission form.
      *
      * GET:
+     *
      * /api/admission/online-form/{formId}/documents
+     *
+     * Query:
+     *
+     * ?nar_id=0
      */
     public function index(Request $request, $formId)
     {
-        $validated = $request->validate(['nar_id' => 'required|integer']);
+        /*
+        |--------------------------------------------------------------------------
+        | Validate request
+        |--------------------------------------------------------------------------
+        */
+
+        $validated = $request->validate([
+
+            'nar_id' => [
+                'required',
+                'integer'
+            ]
+
+        ]);
+
 
         /*
         |--------------------------------------------------------------------------
@@ -233,67 +492,158 @@ class AdmissionDocumentController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $student = OnlineAdmissionForm::where('form_id', $formId)->first();
+        $student = OnlineAdmissionForm::where(
+
+            'form_id',
+
+            $formId
+
+        )->first();
+
 
         if (!$student) {
+
             return response()->json([
+
                 'success' => false,
-                'message' => 'Online admission form not found.'
+
+                'message' =>
+                    'Online admission form not found.'
+
             ], 404);
         }
 
-        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
+
+        /*
+        |--------------------------------------------------------------------------
+        | Authorization
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            (int) $student->nar_id !==
+            (int) $validated['nar_id']
+        ) {
+
             return response()->json([
+
                 'success' => false,
-                'message' => 'You are not authorized to access this admission form.'
+
+                'message' =>
+                    'You are not authorized to access this admission form.'
+
             ], 403);
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Get documents
+        | Get uploaded documents
         |--------------------------------------------------------------------------
         */
 
-        $documents = AdmissionUploadDocument::where(
-            'form_id',
-            $formId
-        )->get();
+        $documents =
+            AdmissionUploadDocument::where(
+
+                'form_id',
+
+                $formId
+
+            )->get();
 
 
         /*
         |--------------------------------------------------------------------------
-        | Add document URL
+        | Get document types from database
+        |--------------------------------------------------------------------------
+        |
+        | We load the document types once instead of running
+        | a separate query for every uploaded document.
+        |
+        */
+
+        $documentTypes =
+            AdmissionDocumentType::where(
+
+                'is_active',
+
+                'Y'
+
+            )
+            ->get()
+            ->keyBy('code');
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Add dynamic document information
         |--------------------------------------------------------------------------
         */
 
-        $documents->transform(function ($document) {
+        $documents->transform(
 
-            $document->document_type =
-                self::DOCUMENT_TYPES[$document->doc_type]
-                ?? 'Unknown';
+            function ($document) use ($documentTypes) {
 
-            $document->document_url = asset(
-                'storage/admission_documents/'
-                . $document->image_name
-            );
+                $documentType =
+                    $documentTypes->get(
+                        strtoupper($document->doc_type)
+                    );
 
-            return $document;
-        });
 
+                /*
+                |--------------------------------------------------------------
+                | Document name
+                |--------------------------------------------------------------
+                */
+
+                $document->document_type =
+                    $documentType
+                        ? $documentType->name
+                        : 'Unknown';
+
+
+                /*
+                |--------------------------------------------------------------
+                | Document URL
+                |--------------------------------------------------------------
+                */
+
+                $document->document_url =
+                    asset(
+
+                        'storage/admission_documents/' .
+                        $document->image_name
+
+                    );
+
+
+                return $document;
+            }
+        );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Response
+        |--------------------------------------------------------------------------
+        */
 
         return response()->json([
+
             'success' => true,
 
             'data' => [
-                'form_id' => $formId,
 
-                'documents' => $documents,
+                'form_id' =>
+                    $formId,
+
+                'documents' =>
+                    $documents,
 
                 'admission_form_status' =>
                     $student->admission_form_status,
             ]
+
         ]);
     }
 
@@ -302,58 +652,156 @@ class AdmissionDocumentController extends Controller
      * View / download a specific document.
      *
      * GET:
+     *
      * /api/admission/online-form/{formId}/documents/{docType}
+     *
+     * Example:
+     *
+     * /api/admission/online-form/2026-27-GRADE-1-0001/documents/BC?nar_id=0
      */
-    public function view(Request $request, $formId, $docType)
-    {
-        $validated = $request->validate(['nar_id' => 'required|integer']);
-        $docType = strtoupper($docType);
+    public function view(
+        Request $request,
+        $formId,
+        $docType
+    ) {
 
-        $student = OnlineAdmissionForm::where('form_id', $formId)->first();
+        /*
+        |--------------------------------------------------------------------------
+        | Validate request
+        |--------------------------------------------------------------------------
+        */
+
+        $validated = $request->validate([
+
+            'nar_id' => [
+                'required',
+                'integer'
+            ]
+
+        ]);
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Normalize document type
+        |--------------------------------------------------------------------------
+        */
+
+        $docType =
+            strtoupper(
+                trim($docType)
+            );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Check admission form
+        |--------------------------------------------------------------------------
+        */
+
+        $student =
+            OnlineAdmissionForm::where(
+
+                'form_id',
+
+                $formId
+
+            )->first();
+
 
         if (!$student) {
-            return response()->json(['success' => false, 'message' => 'Online admission form not found.'], 404);
-        }
 
-        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
-            return response()->json(['success' => false, 'message' => 'You are not authorized to access this admission form.'], 403);
+            return response()->json([
+
+                'success' => false,
+
+                'message' =>
+                    'Online admission form not found.'
+
+            ], 404);
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Validate document type
+        | Authorization
         |--------------------------------------------------------------------------
         */
 
-        if (!array_key_exists($docType, self::DOCUMENT_TYPES)) {
+        if (
+            (int) $student->nar_id !==
+            (int) $validated['nar_id']
+        ) {
 
             return response()->json([
+
                 'success' => false,
-                'message' => 'Invalid document type.'
+
+                'message' =>
+                    'You are not authorized to access this admission form.'
+
+            ], 403);
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Find document type dynamically
+        |--------------------------------------------------------------------------
+        */
+
+        $documentType =
+            $this->findDocumentType(
+                $docType
+            );
+
+
+        if (!$documentType) {
+
+            return response()->json([
+
+                'success' => false,
+
+                'message' =>
+                    'Invalid or inactive document type.'
+
             ], 422);
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Find document
+        | Find uploaded document
         |--------------------------------------------------------------------------
         */
 
-        $document = AdmissionUploadDocument::where(
-            'form_id',
-            $formId
-        )
-            ->where('doc_type', $docType)
+        $document =
+            AdmissionUploadDocument::where(
+
+                'form_id',
+
+                $formId
+
+            )
+            ->where(
+
+                'doc_type',
+
+                $documentType->code
+
+            )
             ->first();
 
 
         if (!$document) {
 
             return response()->json([
+
                 'success' => false,
-                'message' => 'Document not found.'
+
+                'message' =>
+                    'Document not found.'
+
             ], 404);
         }
 
@@ -364,42 +812,57 @@ class AdmissionDocumentController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $filePath = 'admission_documents/'
-            . $document->image_name;
+        $filePath =
+            'admission_documents/' .
+            $document->image_name;
 
 
-        if (!Storage::disk('public')->exists($filePath)) {
+        if (
+            !Storage::disk('public')
+                ->exists($filePath)
+        ) {
 
             return response()->json([
+
                 'success' => false,
-                'message' => 'Document file not found in storage.'
+
+                'message' =>
+                    'Document file not found in storage.'
+
             ], 404);
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Return document information
+        | Response
         |--------------------------------------------------------------------------
         */
 
         return response()->json([
+
             'success' => true,
 
             'data' => [
-                'form_id' => $document->form_id,
 
-                'doc_type' => $document->doc_type,
+                'form_id' =>
+                    $document->form_id,
+
+                'doc_type' =>
+                    $document->doc_type,
 
                 'document_type' =>
-                    self::DOCUMENT_TYPES[$docType],
+                    $documentType->name,
 
                 'image_name' =>
                     $document->image_name,
 
                 'document_url' =>
-                    asset('storage/' . $filePath),
+                    asset(
+                        'storage/' . $filePath
+                    ),
             ]
+
         ]);
     }
 
@@ -408,43 +871,156 @@ class AdmissionDocumentController extends Controller
      * Delete a document.
      *
      * DELETE:
+     *
      * /api/admission/online-form/{formId}/documents/{docType}
+     *
+     * Query:
+     *
+     * ?nar_id=0
      */
-    public function destroy(Request $request, $formId, $docType)
-    {
-        $validated = $request->validate(['nar_id' => 'required|integer']);
-        $docType = strtoupper($docType);
+    public function destroy(
+        Request $request,
+        $formId,
+        $docType
+    ) {
 
-        $student = OnlineAdmissionForm::where('form_id', $formId)->first();
+        /*
+        |--------------------------------------------------------------------------
+        | Validate request
+        |--------------------------------------------------------------------------
+        */
+
+        $validated = $request->validate([
+
+            'nar_id' => [
+                'required',
+                'integer'
+            ]
+
+        ]);
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Normalize document type
+        |--------------------------------------------------------------------------
+        */
+
+        $docType =
+            strtoupper(
+                trim($docType)
+            );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Check admission form
+        |--------------------------------------------------------------------------
+        */
+
+        $student =
+            OnlineAdmissionForm::where(
+
+                'form_id',
+
+                $formId
+
+            )->first();
+
 
         if (!$student) {
-            return response()->json(['success' => false, 'message' => 'Online admission form not found.'], 404);
-        }
 
-        if ((int) $student->nar_id !== (int) $validated['nar_id']) {
-            return response()->json(['success' => false, 'message' => 'You are not authorized to access this admission form.'], 403);
+            return response()->json([
+
+                'success' => false,
+
+                'message' =>
+                    'Online admission form not found.'
+
+            ], 404);
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Find document
+        | Authorization
         |--------------------------------------------------------------------------
         */
 
-        $document = AdmissionUploadDocument::where(
-            'form_id',
-            $formId
-        )
-            ->where('doc_type', $docType)
+        if (
+            (int) $student->nar_id !==
+            (int) $validated['nar_id']
+        ) {
+
+            return response()->json([
+
+                'success' => false,
+
+                'message' =>
+                    'You are not authorized to access this admission form.'
+
+            ], 403);
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Find document type dynamically
+        |--------------------------------------------------------------------------
+        */
+
+        $documentType =
+            $this->findDocumentType(
+                $docType
+            );
+
+
+        if (!$documentType) {
+
+            return response()->json([
+
+                'success' => false,
+
+                'message' =>
+                    'Invalid or inactive document type.'
+
+            ], 422);
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Find uploaded document
+        |--------------------------------------------------------------------------
+        */
+
+        $document =
+            AdmissionUploadDocument::where(
+
+                'form_id',
+
+                $formId
+
+            )
+            ->where(
+
+                'doc_type',
+
+                $documentType->code
+
+            )
             ->first();
 
 
         if (!$document) {
 
             return response()->json([
+
                 'success' => false,
-                'message' => 'Document not found.'
+
+                'message' =>
+                    'Document not found.'
+
             ], 404);
         }
 
@@ -455,13 +1031,18 @@ class AdmissionDocumentController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $filePath = 'admission_documents/'
-            . $document->image_name;
+        $filePath =
+            'admission_documents/' .
+            $document->image_name;
 
 
-        if (Storage::disk('public')->exists($filePath)) {
+        if (
+            Storage::disk('public')
+                ->exists($filePath)
+        ) {
 
-            Storage::disk('public')->delete($filePath);
+            Storage::disk('public')
+                ->delete($filePath);
         }
 
 
@@ -474,10 +1055,20 @@ class AdmissionDocumentController extends Controller
         $document->delete();
 
 
+        /*
+        |--------------------------------------------------------------------------
+        | Response
+        |--------------------------------------------------------------------------
+        */
+
         return response()->json([
+
             'success' => true,
 
-            'message' => 'Document deleted successfully.'
+            'message' =>
+                $documentType->name .
+                ' deleted successfully.'
+
         ]);
     }
 }

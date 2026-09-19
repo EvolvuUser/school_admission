@@ -9,6 +9,8 @@ use App\Http\Controllers\Api\AdmissionFormFieldOptionController;
 use App\Http\Controllers\Api\OnlineAdmissionFormController;
 use App\Http\Controllers\Api\AdmissionDocumentController;
 use App\Http\Controllers\Api\AdmissionPaymentController;
+use App\Http\Controllers\Api\AdmissionDocumentTypeController;
+use App\Http\Controllers\Api\AdmissionEnquiryController;
 
 
 
@@ -101,4 +103,24 @@ Route::get(
 Route::post(
     '/admission/payment/callback',
     [AdmissionPaymentController::class, 'paymentCallback']
+);
+Route::get(
+    '/admission/document-types',
+    [AdmissionDocumentTypeController::class, 'index']
+);
+// Admission Enquiry APIs
+
+Route::post(
+    '/admission/enquiries',
+    [AdmissionEnquiryController::class, 'store']
+);
+
+Route::get(
+    '/admission/enquiries',
+    [AdmissionEnquiryController::class, 'index']
+);
+
+Route::get(
+    '/admission/enquiries/{id}',
+    [AdmissionEnquiryController::class, 'show']
 );
