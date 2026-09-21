@@ -11,3 +11,7 @@ Route::post(
     '/api/admission/mobile/send-otp',
     [AdmissionController::class, 'sendOtp']
 );
+
+Route::fallback(function () {
+    return view('welcome');
+});

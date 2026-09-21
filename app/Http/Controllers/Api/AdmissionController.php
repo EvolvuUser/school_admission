@@ -175,6 +175,41 @@ class AdmissionController extends Controller
     {
         /*
         |--------------------------------------------------------------------------
+        | Support both legacy frontend payloads and the newer API payload format.
+        |--------------------------------------------------------------------------
+        */
+
+        $requestData = $request->all();
+
+        if (empty($requestData['type'])) {
+            if (!empty($requestData['email'])) {
+                $requestData['type'] = 'email';
+                $requestData['value'] = $requestData['email'];
+            } elseif (!empty($requestData['mobile'])) {
+                $requestData['type'] = 'mobile';
+                $requestData['value'] = $requestData['mobile'];
+            } elseif (!empty($requestData['phone_no'])) {
+                $requestData['type'] = 'mobile';
+                $requestData['value'] = $requestData['phone_no'];
+            }
+        }
+
+        if (empty($requestData['value']) && !empty($requestData['email'])) {
+            $requestData['value'] = $requestData['email'];
+        }
+
+        if (empty($requestData['value']) && !empty($requestData['mobile'])) {
+            $requestData['value'] = $requestData['mobile'];
+        }
+
+        if (empty($requestData['value']) && !empty($requestData['phone_no'])) {
+            $requestData['value'] = $requestData['phone_no'];
+        }
+
+        $request->replace($requestData);
+
+        /*
+        |--------------------------------------------------------------------------
         | Validate Request
         |--------------------------------------------------------------------------
         */
@@ -182,7 +217,7 @@ class AdmissionController extends Controller
         $validated = $request->validate([
 
             'type' =>
-                'required|in:mobile,email',
+                'nullable|in:mobile,email',
 
             'value' =>
                 'required|string',
@@ -191,7 +226,7 @@ class AdmissionController extends Controller
                 'nullable|string|max:255',
 
             'school_id' =>
-                'required|integer',
+                'nullable|integer',
         ]);
 
 
@@ -554,6 +589,35 @@ class AdmissionController extends Controller
 
     public function verifyOtp(Request $request)
     {
+        $requestData = $request->all();
+
+        if (empty($requestData['type'])) {
+            if (!empty($requestData['email'])) {
+                $requestData['type'] = 'email';
+                $requestData['value'] = $requestData['email'];
+            } elseif (!empty($requestData['mobile'])) {
+                $requestData['type'] = 'mobile';
+                $requestData['value'] = $requestData['mobile'];
+            } elseif (!empty($requestData['phone_no'])) {
+                $requestData['type'] = 'mobile';
+                $requestData['value'] = $requestData['phone_no'];
+            }
+        }
+
+        if (empty($requestData['value']) && !empty($requestData['email'])) {
+            $requestData['value'] = $requestData['email'];
+        }
+
+        if (empty($requestData['value']) && !empty($requestData['mobile'])) {
+            $requestData['value'] = $requestData['mobile'];
+        }
+
+        if (empty($requestData['value']) && !empty($requestData['phone_no'])) {
+            $requestData['value'] = $requestData['phone_no'];
+        }
+
+        $request->replace($requestData);
+
         /*
         |--------------------------------------------------------------------------
         | Validate Request
@@ -731,6 +795,35 @@ class AdmissionController extends Controller
 
     public function resendOtp(Request $request)
     {
+        $requestData = $request->all();
+
+        if (empty($requestData['type'])) {
+            if (!empty($requestData['email'])) {
+                $requestData['type'] = 'email';
+                $requestData['value'] = $requestData['email'];
+            } elseif (!empty($requestData['mobile'])) {
+                $requestData['type'] = 'mobile';
+                $requestData['value'] = $requestData['mobile'];
+            } elseif (!empty($requestData['phone_no'])) {
+                $requestData['type'] = 'mobile';
+                $requestData['value'] = $requestData['phone_no'];
+            }
+        }
+
+        if (empty($requestData['value']) && !empty($requestData['email'])) {
+            $requestData['value'] = $requestData['email'];
+        }
+
+        if (empty($requestData['value']) && !empty($requestData['mobile'])) {
+            $requestData['value'] = $requestData['mobile'];
+        }
+
+        if (empty($requestData['value']) && !empty($requestData['phone_no'])) {
+            $requestData['value'] = $requestData['phone_no'];
+        }
+
+        $request->replace($requestData);
+
         /*
         |--------------------------------------------------------------------------
         | Validate Request
@@ -741,13 +834,13 @@ class AdmissionController extends Controller
             $request->validate([
 
                 'type' =>
-                    'required|in:mobile,email',
+                    'nullable|in:mobile,email',
 
                 'value' =>
                     'required|string',
 
                 'school_id' =>
-                    'required|integer',
+                    'nullable|integer',
             ]);
 
 

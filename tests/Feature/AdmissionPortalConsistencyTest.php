@@ -31,6 +31,13 @@ class AdmissionPortalConsistencyTest extends TestCase
             $table->string('last_name')->nullable();
             $table->string('status')->nullable();
         });
+
+        Schema::create('school_settings', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('school_id');
+            $table->string('institute_name')->nullable();
+            $table->string('is_active')->default('Y');
+        });
     }
 
     public function test_dashboard_count_matches_online_forms_for_same_registration(): void
@@ -78,9 +85,31 @@ class AdmissionPortalConsistencyTest extends TestCase
         ]);
 
         $response->assertOk()
-            ->assertJsonPath('data.nar_id', $narId)
+            ->assertJsonPath('data.nar_id', $nar_id)
             ->assertJsonPath('data.phone_no', '9876543210');
 
         $this->assertSame(1, DB::table('new_adm_registration')->count());
+    }
+
+    public function test_send_otp_accepts_email_payload_without_type_field(): void
+    {
+        DB::table('school_settings')->insert([
+            'school_id' => 1,
+            'institute_name' => 'Demo School',
+            'is_active' => 'Y',
+        ]);
+
+        $response = $this->postJson('/api/admission/send-otp', [
+            'email' => 'parent@example.com',
+            'parent_name' => 'Sample Parent',
+            'school_id' => 1,
+        ]);
+
+        $response->assertOk();
+    }
+
+    public function test_single_page_routes_do_not_404_on_refresh(): void
+    {
+        $this->get('/verify-otp')->assertOk();
     }
 }
