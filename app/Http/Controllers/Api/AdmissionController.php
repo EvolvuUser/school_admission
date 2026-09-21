@@ -1964,52 +1964,159 @@ class AdmissionController extends Controller
     }
 
 
+   /*
+|--------------------------------------------------------------------------
+| Get Dashboard
+|--------------------------------------------------------------------------
+|
+| GET:
+| /api/admission/dashboard
+|
+| Dashboard shows:
+|
+| 1. Total admission forms filled by the parent
+| 2. Total amount actually paid
+|
+| Forms:
+| online_admission_form
+|
+| Payments:
+| online_admfee
+|
+| Successful payment:
+| status = S
+|
+*/
+
+public function getDashboard(Request $request)
+{
     /*
     |--------------------------------------------------------------------------
-    | Get Dashboard
+    | Validate nar_id
+    |--------------------------------------------------------------------------
+    */
+
+    $validated = $request->validate([
+        'nar_id' => 'required|integer',
+    ]);
+
+    $narId = $validated['nar_id'];
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Count Filled Admission Forms
     |--------------------------------------------------------------------------
     |
-    | GET:
-    | /api/admission/dashboard
+    | Each admission application is stored in
+    | online_admission_form.
+    |
+    | nar_id identifies the parent/user.
+    |
+    | COUNT DISTINCT form_id is used so that the same
+    | application is not counted multiple times.
     |
     */
 
-    public function getDashboard(
-        Request $request
-    ) {
-
-        $validated =
-            $request->validate([
-
-                'nar_id' =>
-                    'required'
-
-            ]);
+    $formsCount = DB::table('online_admission_form')
+        ->where('nar_id', $narId)
+        ->distinct('form_id')
+        ->count('form_id');
 
 
-        $totalForms =
-            DB::table(
-                'online_admission_form'
-            )
-            ->where(
-                'nar_id',
-                $validated['nar_id']
-            )
-            ->count();
+    /*
+    |--------------------------------------------------------------------------
+    | Calculate Total Amount Paid
+    |--------------------------------------------------------------------------
+    |
+    | Payment records are stored in online_admfee.
+    |
+    | online_admfee.form_id
+    |          |
+    |          v
+    | online_admission_form.form_id
+    |
+    | Only successful payments are counted:
+    |
+    | status = S
+    |
+    */
+
+    $totalAmountPaid = DB::table('online_admfee')
+        ->join(
+            'online_admission_form',
+            'online_admfee.form_id',
+            '=',
+            'online_admission_form.form_id'
+        )
+        ->where(
+            'online_admission_form.nar_id',
+            $narId
+        )
+        ->where(
+            'online_admfee.status',
+            'S'
+        )
+        ->sum(
+            'online_admfee.amount'
+        );
 
 
-        return response()->json([
+    /*
+    |--------------------------------------------------------------------------
+    | Format Amount
+    |--------------------------------------------------------------------------
+    |
+    | Example:
+    |
+    | 300
+    | becomes
+    | 300.00
+    |
+    */
 
-            'success' =>
-                true,
+    $totalAmountPaid =
+        number_format(
+            (float) $totalAmountPaid,
+            2,
+            '.',
+            ''
+        );
 
-            'data' => [
 
-                'forms_count' =>
-                    $totalForms
+    /*
+    |--------------------------------------------------------------------------
+    | Dashboard Response
+    |--------------------------------------------------------------------------
+    */
 
-            ]
+    return response()->json([
 
-        ]);
-    }
+        'success' => true,
+
+        'data' => [
+
+            /*
+            |--------------------------------------------------------------------------
+            | Total Forms
+            |--------------------------------------------------------------------------
+            */
+
+            'forms_count' =>
+                $formsCount,
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Total Amount Paid
+            |--------------------------------------------------------------------------
+            */
+
+            'amount_paid' =>
+                $totalAmountPaid,
+
+        ]
+
+    ]);
+}
 }
