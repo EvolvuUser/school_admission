@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Http\Services\WhatsAppService;
 use App\Http\Services\SmartMailer;
+use Carbon\Carbon;
 
 class AdmissionController extends Controller
 {
@@ -113,6 +114,7 @@ class AdmissionController extends Controller
         if (!$registration) {
 
             $registration = Admission::create([
+
                 'parent_name' =>
                     $validated['parent_name'],
 
@@ -124,6 +126,7 @@ class AdmissionController extends Controller
 
                 'date' =>
                     now()->toDateString(),
+
             ]);
 
             $created = true;
@@ -152,7 +155,7 @@ class AdmissionController extends Controller
 
     /*
     |--------------------------------------------------------------------------
-    | Send OTP
+    | Send OTP / Login
     |--------------------------------------------------------------------------
     |
     | POST:
@@ -160,10 +163,15 @@ class AdmissionController extends Controller
     |
     | IMPORTANT:
     |
-    | Existing user -> UPDATE OTP
-    | New user      -> CREATE USER
+    | NEW USER:
+    |     Generate first OTP.
     |
-    | The UNIQUE user_id column is handled using UPSERT.
+    | EXISTING USER:
+    |     DO NOT generate a new OTP.
+    |     DO NOT update password.
+    |     DO NOT send WhatsApp OTP.
+    |
+    | The existing user's current password/OTP remains unchanged.
     |
     */
 
@@ -189,17 +197,23 @@ class AdmissionController extends Controller
             if (!empty($requestData['email'])) {
 
                 $requestData['type'] = 'email';
-                $requestData['value'] = $requestData['email'];
+
+                $requestData['value'] =
+                    $requestData['email'];
 
             } elseif (!empty($requestData['mobile'])) {
 
                 $requestData['type'] = 'mobile';
-                $requestData['value'] = $requestData['mobile'];
+
+                $requestData['value'] =
+                    $requestData['mobile'];
 
             } elseif (!empty($requestData['phone_no'])) {
 
                 $requestData['type'] = 'mobile';
-                $requestData['value'] = $requestData['phone_no'];
+
+                $requestData['value'] =
+                    $requestData['phone_no'];
             }
         }
 
@@ -214,6 +228,7 @@ class AdmissionController extends Controller
             empty($requestData['value']) &&
             !empty($requestData['email'])
         ) {
+
             $requestData['value'] =
                 $requestData['email'];
         }
@@ -223,6 +238,7 @@ class AdmissionController extends Controller
             empty($requestData['value']) &&
             !empty($requestData['mobile'])
         ) {
+
             $requestData['value'] =
                 $requestData['mobile'];
         }
@@ -232,6 +248,7 @@ class AdmissionController extends Controller
             empty($requestData['value']) &&
             !empty($requestData['phone_no'])
         ) {
+
             $requestData['value'] =
                 $requestData['phone_no'];
         }
@@ -259,6 +276,7 @@ class AdmissionController extends Controller
 
             'school_id' =>
                 'nullable|integer',
+
         ]);
 
 
@@ -273,16 +291,6 @@ class AdmissionController extends Controller
 
         $value =
             trim($validated['value']);
-
-        /*
-         * IMPORTANT:
-         *
-         * Do not access:
-         *
-         * $validated['school_id']
-         *
-         * directly because it is nullable.
-         */
 
         $schoolId =
             $validated['school_id'] ?? null;
@@ -407,14 +415,84 @@ class AdmissionController extends Controller
 
                     'date' =>
                         now()->toDateString(),
+
                 ]);
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Generate OTP
+        | CHECK EXISTING USER
         |--------------------------------------------------------------------------
+        |
+        | IMPORTANT:
+        |
+        | This is the main change.
+        |
+        | If the user already exists:
+        |
+        | - Do NOT generate OTP
+        | - Do NOT update password
+        | - Do NOT send WhatsApp
+        |
+        | The user should use the existing OTP/password.
+        |
+        */
+
+        $existingUser =
+            AdmissionUser::where(
+                'user_id',
+                $value
+            )->first();
+
+
+        if ($existingUser) {
+
+            Log::info(
+                'Existing Admission User Login - Existing Password Will Be Used',
+                [
+
+                    'user_id' =>
+                        $value,
+
+                    'nar_id' =>
+                        $existingUser->nar_id,
+
+                    'IsVerify' =>
+                        $existingUser->IsVerify,
+
+                ]
+            );
+
+
+            return response()->json([
+
+                'success' =>
+                    true,
+
+                'message' =>
+                    'Existing user found. Please use your existing OTP/password.',
+
+                'is_existing_user' =>
+                    true,
+
+                'otp_sent' =>
+                    false,
+
+                'nar_id' =>
+                    $existingUser->nar_id,
+
+            ]);
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | NEW USER
+        |--------------------------------------------------------------------------
+        |
+        | Only a NEW user receives a first OTP.
+        |
         */
 
         $otp =
@@ -426,26 +504,12 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | IMPORTANT FIX
+        | Create New OTP User
         |--------------------------------------------------------------------------
-        |
-        | DO NOT use:
-        |
-        | AdmissionUser::create()
-        |
-        | when user_id already exists.
-        |
-        | user_id is UNIQUE.
-        |
-        | We use UPSERT so:
-        |
-        | Existing user -> UPDATE
-        | New user      -> INSERT
-        |
         */
 
         $user =
-            $this->createOrUpdateOtpUser(
+            $this->createNewOtpUser(
                 $value,
                 $otp,
                 $registration->nar_id
@@ -534,7 +598,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Response
+        | Response For NEW User
         |--------------------------------------------------------------------------
         */
 
@@ -545,6 +609,12 @@ class AdmissionController extends Controller
 
             'message' =>
                 'OTP generated and sent successfully.',
+
+            'is_existing_user' =>
+                false,
+
+            'otp_sent' =>
+                true,
 
             'nar_id' =>
                 $registration->nar_id,
@@ -561,103 +631,20 @@ class AdmissionController extends Controller
 
     /*
     |--------------------------------------------------------------------------
-    | CREATE OR UPDATE OTP USER
+    | CREATE NEW OTP USER
     |--------------------------------------------------------------------------
     |
-    | THIS IS THE MAIN FIX FOR THE DUPLICATE user_id ERROR.
+    | This method is ONLY used for a new user.
     |
-    | MySQL will automatically:
-    |
-    | INSERT -> if user_id does not exist
-    |
-    | UPDATE -> if user_id already exists
+    | Existing users are NOT updated here.
     |
     */
 
-    private function createOrUpdateOtpUser(
+    private function createNewOtpUser(
         string $userId,
         int $otp,
         $narId
     ) {
-
-        /*
-        |--------------------------------------------------------------------------
-        | Check Existing User First
-        |--------------------------------------------------------------------------
-        |
-        | IMPORTANT:
-        |
-        | Do NOT filter by IsDelete here.
-        |
-        | We need to find ANY existing user with this user_id because
-        | user_id is UNIQUE.
-        |
-        */
-
-        $existingUser =
-            AdmissionUser::where(
-                'user_id',
-                $userId
-            )->first();
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Existing User
-        |--------------------------------------------------------------------------
-        */
-
-        if ($existingUser) {
-
-            /*
-             * Update the existing record.
-             *
-             * This also handles records where IsDelete is Y.
-             */
-
-            $existingUser->update([
-
-                'password' =>
-                    $otp,
-
-                'otp_generated_at' =>
-                    now(),
-
-                'IsDelete' =>
-                    'N',
-
-                'IsVerify' =>
-                    'N',
-
-            ]);
-
-
-            Log::info(
-                'Existing Admission User OTP Updated',
-                [
-
-                    'user_id' =>
-                        $userId,
-
-                    'otp' =>
-                        $otp,
-
-                    'nar_id' =>
-                        $existingUser->nar_id,
-
-                ]
-            );
-
-
-            return $existingUser;
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | New User
-        |--------------------------------------------------------------------------
-        */
 
         $newUserData = [
 
@@ -687,44 +674,25 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Use INSERT ... ON DUPLICATE KEY UPDATE
+        | Insert Only
         |--------------------------------------------------------------------------
         |
-        | This is safer than simply doing:
+        | user_id is UNIQUE.
         |
-        | if (!$user) {
-        |     create();
-        | }
-        |
-        | because two requests can arrive at almost the same time.
+        | insertOrIgnore prevents duplicate-entry error if another request
+        | creates the same user at nearly the same time.
         |
         */
 
         DB::table('new_adm_user_master')
-            ->upsert(
-
-                [$newUserData],
-
-                ['user_id'],
-
-                [
-
-                    'password',
-
-                    'otp_generated_at',
-
-                    'IsDelete',
-
-                    'IsVerify',
-
-                ]
-
+            ->insertOrIgnore(
+                $newUserData
             );
 
 
         /*
         |--------------------------------------------------------------------------
-        | Get User After Upsert
+        | Get User
         |--------------------------------------------------------------------------
         */
 
@@ -736,7 +704,7 @@ class AdmissionController extends Controller
 
 
         Log::info(
-            'Admission User OTP Created/Updated',
+            'New Admission User OTP Created',
             [
 
                 'user_id' =>
@@ -760,11 +728,22 @@ class AdmissionController extends Controller
 
     /*
     |--------------------------------------------------------------------------
-    | Verify OTP
+    | Verify OTP / Password
     |--------------------------------------------------------------------------
     |
     | POST:
     | /api/admission/verify-otp
+    |
+    | IMPORTANT:
+    |
+    | Existing verified users must also be allowed to login using their
+    | permanent password.
+    |
+    | Therefore we DO NOT require:
+    |
+    | IsVerify = N
+    |
+    | anymore.
     |
     */
 
@@ -784,18 +763,21 @@ class AdmissionController extends Controller
             if (!empty($requestData['email'])) {
 
                 $requestData['type'] = 'email';
+
                 $requestData['value'] =
                     $requestData['email'];
 
             } elseif (!empty($requestData['mobile'])) {
 
                 $requestData['type'] = 'mobile';
+
                 $requestData['value'] =
                     $requestData['mobile'];
 
             } elseif (!empty($requestData['phone_no'])) {
 
                 $requestData['type'] = 'mobile';
+
                 $requestData['value'] =
                     $requestData['phone_no'];
             }
@@ -926,8 +908,25 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Find User
+        | Find User By Current Password
         |--------------------------------------------------------------------------
+        |
+        | IMPORTANT:
+        |
+        | We only check:
+        |
+        | user_id
+        | password
+        | IsDelete = N
+        |
+        | We do NOT check IsVerify = N.
+        |
+        | Therefore:
+        |
+        | First OTP -> works
+        | Permanent password -> works
+        | Resent OTP -> new password works
+        |
         */
 
         $user =
@@ -943,16 +942,12 @@ class AdmissionController extends Controller
                 'IsDelete',
                 'N'
             )
-            ->where(
-                'IsVerify',
-                'N'
-            )
             ->first();
 
 
         /*
         |--------------------------------------------------------------------------
-        | Invalid OTP
+        | Invalid OTP / Password
         |--------------------------------------------------------------------------
         */
 
@@ -963,7 +958,7 @@ class AdmissionController extends Controller
                 'success' => false,
 
                 'message' =>
-                    'Invalid OTP.'
+                    'Invalid OTP/password.'
 
             ], 401);
         }
@@ -971,16 +966,22 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Mark Verified
+        | Mark User Verified
         |--------------------------------------------------------------------------
+        |
+        | If the user is already verified, this simply keeps it as Y.
+        |
         */
 
-        $user->update([
+        if ($user->IsVerify !== 'Y') {
 
-            'IsVerify' =>
-                'Y'
+            $user->update([
 
-        ]);
+                'IsVerify' =>
+                    'Y'
+
+            ]);
+        }
 
 
         /*
@@ -995,7 +996,7 @@ class AdmissionController extends Controller
                 true,
 
             'message' =>
-                'OTP verified successfully.',
+                'OTP/password verified successfully.',
 
             'nar_id' =>
                 $registration->nar_id,
@@ -1015,6 +1016,18 @@ class AdmissionController extends Controller
     | POST:
     | /api/admission/resend-otp
     |
+    | IMPORTANT:
+    |
+    | This is the ONLY method that generates a new OTP for an existing user.
+    |
+    | New OTP:
+    |
+    | 1. Generate
+    | 2. Replace password in new_adm_user_master
+    | 3. Update otp_generated_at
+    | 4. Set IsVerify = N
+    | 5. Send WhatsApp/Email
+    |
     */
 
     public function resendOtp(Request $request)
@@ -1033,18 +1046,21 @@ class AdmissionController extends Controller
             if (!empty($requestData['email'])) {
 
                 $requestData['type'] = 'email';
+
                 $requestData['value'] =
                     $requestData['email'];
 
             } elseif (!empty($requestData['mobile'])) {
 
                 $requestData['type'] = 'mobile';
+
                 $requestData['value'] =
                     $requestData['mobile'];
 
             } elseif (!empty($requestData['phone_no'])) {
 
                 $requestData['type'] = 'mobile';
+
                 $requestData['value'] =
                     $requestData['phone_no'];
             }
@@ -1212,26 +1228,8 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Generate New OTP
+        | Find Existing User
         |--------------------------------------------------------------------------
-        */
-
-        $otp =
-            random_int(
-                10000,
-                99999
-            );
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | IMPORTANT
-        |--------------------------------------------------------------------------
-        |
-        | Do not create a new user.
-        |
-        | Update the existing user using the same helper.
-        |
         */
 
         $user =
@@ -1256,8 +1254,24 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Update Existing OTP
+        | Generate NEW OTP
         |--------------------------------------------------------------------------
+        */
+
+        $otp =
+            random_int(
+                10000,
+                99999
+            );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Update Existing User
+        |--------------------------------------------------------------------------
+        |
+        | This replaces the old OTP/password.
+        |
         */
 
         $user->update([
@@ -1277,9 +1291,26 @@ class AdmissionController extends Controller
         ]);
 
 
+        Log::info(
+            'Admission Resend OTP - Password Updated',
+            [
+
+                'user_id' =>
+                    $value,
+
+                'otp' =>
+                    $otp,
+
+                'nar_id' =>
+                    $user->nar_id,
+
+            ]
+        );
+
+
         /*
         |--------------------------------------------------------------------------
-        | Send Resend OTP Through WhatsApp
+        | Send WhatsApp OTP
         |--------------------------------------------------------------------------
         */
 
@@ -1352,7 +1383,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Send Resend OTP Through Email
+        | Send Email OTP
         |--------------------------------------------------------------------------
         */
 
@@ -1404,6 +1435,12 @@ class AdmissionController extends Controller
 
             'message' =>
                 'New OTP generated and sent successfully.',
+
+            'is_existing_user' =>
+                true,
+
+            'otp_sent' =>
+                true,
 
             'nar_id' =>
                 $registration->nar_id,
@@ -1481,6 +1518,7 @@ class AdmissionController extends Controller
                     null,
 
                     [$message]
+
                 );
 
         } catch (\Throwable $e) {
@@ -1702,7 +1740,9 @@ class AdmissionController extends Controller
 
 
         /*
+        |--------------------------------------------------------------------------
         | Remove spaces, +, -, brackets, etc.
+        |--------------------------------------------------------------------------
         */
 
         $phone =
@@ -1714,7 +1754,9 @@ class AdmissionController extends Controller
 
 
         /*
+        |--------------------------------------------------------------------------
         | Remove Indian country code
+        |--------------------------------------------------------------------------
         */
 
         if (
@@ -1731,7 +1773,9 @@ class AdmissionController extends Controller
 
 
         /*
+        |--------------------------------------------------------------------------
         | Validate Indian Mobile
+        |--------------------------------------------------------------------------
         */
 
         if (

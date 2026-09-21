@@ -100,6 +100,7 @@ class AdmissionEnquiryController extends Controller
         ];
 
         if (isset($genderMap[$genderNormalized])) {
+
             $request->merge([
                 'gender' => $genderMap[$genderNormalized]
             ]);
@@ -113,6 +114,7 @@ class AdmissionEnquiryController extends Controller
         */
 
         if ($request->has('class')) {
+
             $request->merge([
                 'class' => trim(
                     (string) $request->input('class')
@@ -129,11 +131,14 @@ class AdmissionEnquiryController extends Controller
 
         foreach ([
             'first_name',
+            'middle_name',
             'last_name',
             'father_name',
             'mother_name',
             'contact_no',
             'current_school',
+            'address',
+            'pincode',
             'email',
             'question'
         ] as $field) {
@@ -156,24 +161,10 @@ class AdmissionEnquiryController extends Controller
         | Normalize All Documents Available
         |--------------------------------------------------------------------------
         |
-        | The API can accept:
+        | Database:
         |
-        | true
-        | false
-        |
-        | "Y"
-        | "N"
-        |
-        | 1
-        | 0
-        |
-        | "yes"
-        | "no"
-        |
-        | Internally we ALWAYS convert it to:
-        |
-        | Y
-        | N
+        | Y = Yes
+        | N = No
         |
         */
 
@@ -213,6 +204,60 @@ class AdmissionEnquiryController extends Controller
 
         /*
         |--------------------------------------------------------------------------
+        | Normalize Sibling Checkbox
+        |--------------------------------------------------------------------------
+        |
+        | Frontend can send:
+        |
+        | true / false
+        | 1 / 0
+        | Y / N
+        | yes / no
+        |
+        | Database stores:
+        |
+        | Y / N
+        |
+        */
+
+        if ($request->has('sibling_currently_studying')) {
+
+            $siblingInput =
+                $request->input(
+                    'sibling_currently_studying'
+                );
+
+            if (
+                $siblingInput === true ||
+                $siblingInput === 1 ||
+                $siblingInput === '1' ||
+                strtolower((string) $siblingInput) === 'y' ||
+                strtolower((string) $siblingInput) === 'yes' ||
+                strtolower((string) $siblingInput) === 'true'
+            ) {
+
+                $request->merge([
+                    'sibling_currently_studying' => 'Y'
+                ]);
+
+            } elseif (
+                $siblingInput === false ||
+                $siblingInput === 0 ||
+                $siblingInput === '0' ||
+                strtolower((string) $siblingInput) === 'n' ||
+                strtolower((string) $siblingInput) === 'no' ||
+                strtolower((string) $siblingInput) === 'false'
+            ) {
+
+                $request->merge([
+                    'sibling_currently_studying' => 'N'
+                ]);
+            }
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
         | Validate Request
         |--------------------------------------------------------------------------
         */
@@ -227,6 +272,12 @@ class AdmissionEnquiryController extends Controller
 
             'first_name' => [
                 'required',
+                'string',
+                'max:100'
+            ],
+
+            'middle_name' => [
+                'nullable',
                 'string',
                 'max:100'
             ],
@@ -311,16 +362,39 @@ class AdmissionEnquiryController extends Controller
 
             /*
             |--------------------------------------------------------------------------
+            | Address
+            |--------------------------------------------------------------------------
+            */
+
+            'address' => [
+                'nullable',
+                'string'
+            ],
+
+            'pincode' => [
+                'nullable',
+                'string',
+                'max:10'
+            ],
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Sibling
+            |--------------------------------------------------------------------------
+            */
+
+            'sibling_currently_studying' => [
+                'nullable',
+                'string',
+                'in:Y,N'
+            ],
+
+
+            /*
+            |--------------------------------------------------------------------------
             | Documents
             |--------------------------------------------------------------------------
-            |
-            | IMPORTANT:
-            |
-            | Database stores:
-            |
-            | Y
-            | N
-            |
             */
 
             'all_documents_available' => [
@@ -367,16 +441,10 @@ class AdmissionEnquiryController extends Controller
         |--------------------------------------------------------------------------
         | Find Selected Class
         |--------------------------------------------------------------------------
-        |
-        | Frontend sends:
-        |
-        | "class": "UKG"
-        |
         */
 
-        $className = trim(
-            $validated['class']
-        );
+        $className =
+            trim($validated['class']);
 
         $class = DB::table('class')
             ->whereRaw(
@@ -435,13 +503,11 @@ class AdmissionEnquiryController extends Controller
         |
         | Frontend:
         |
-        | 06/02/2002
-        |
         | MM/DD/YYYY
         |
         | Database:
         |
-        | 2002-06-02
+        | YYYY-MM-DD
         |
         */
 
@@ -467,12 +533,6 @@ class AdmissionEnquiryController extends Controller
         |--------------------------------------------------------------------------
         | Documents Value
         |--------------------------------------------------------------------------
-        |
-        | ALWAYS store:
-        |
-        | Y
-        | N
-        |
         */
 
         $documentsAvailable =
@@ -481,20 +541,25 @@ class AdmissionEnquiryController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Generate Enquiry Number
+        | Sibling Value
         |--------------------------------------------------------------------------
-        |
-        | Example:
-        |
-        | ENQ-2026-0001
-        | ENQ-2026-0002
-        | ENQ-2026-0003
-        |
         */
 
-        $year = now()->format('Y');
+        $siblingCurrentlyStudying =
+            $validated['sibling_currently_studying'] ?? 'N';
 
-        $lastEnquiry = Enquiry::where(
+
+        /*
+        |--------------------------------------------------------------------------
+        | Generate Enquiry Number
+        |--------------------------------------------------------------------------
+        */
+
+        $year =
+            now()->format('Y');
+
+        $lastEnquiry =
+            Enquiry::where(
                 'enquiry_number',
                 'like',
                 'ENQ-' . $year . '-%'
@@ -505,15 +570,17 @@ class AdmissionEnquiryController extends Controller
 
         if ($lastEnquiry) {
 
-            $lastNumber = (int) substr(
-                $lastEnquiry->enquiry_number,
-                strrpos(
+            $lastNumber =
+                (int) substr(
                     $lastEnquiry->enquiry_number,
-                    '-'
-                ) + 1
-            );
+                    strrpos(
+                        $lastEnquiry->enquiry_number,
+                        '-'
+                    ) + 1
+                );
 
-            $nextNumber = $lastNumber + 1;
+            $nextNumber =
+                $lastNumber + 1;
 
         } else {
 
@@ -539,124 +606,147 @@ class AdmissionEnquiryController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $enquiry = Enquiry::create([
+        $enquiry =
+            Enquiry::create([
 
-            /*
-            |--------------------------------------------------------------------------
-            | Enquiry Number
-            |--------------------------------------------------------------------------
-            */
+                /*
+                |--------------------------------------------------------------------------
+                | Enquiry Number
+                |--------------------------------------------------------------------------
+                */
 
-            'enquiry_number' =>
-                $enquiryNumber,
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Student Details
-            |--------------------------------------------------------------------------
-            */
-
-            'first_name' =>
-                trim(
-                    $validated['first_name']
-                ),
-
-            'last_name' =>
-                trim(
-                    $validated['last_name']
-                ),
-
-            'dob' =>
-                $dob,
-
-            'gender' =>
-                $gender,
+                'enquiry_number' =>
+                    $enquiryNumber,
 
 
-            /*
-            |--------------------------------------------------------------------------
-            | Class
-            |--------------------------------------------------------------------------
-            |
-            | Save class NAME.
-            |
-            */
+                /*
+                |--------------------------------------------------------------------------
+                | Student Details
+                |--------------------------------------------------------------------------
+                */
 
-            'class' =>
-                $class->name,
+                'first_name' =>
+                    trim(
+                        $validated['first_name']
+                    ),
 
+                'middle_name' =>
+                    !empty($validated['middle_name'])
+                        ? trim($validated['middle_name'])
+                        : null,
 
-            /*
-            |--------------------------------------------------------------------------
-            | Parent Details
-            |--------------------------------------------------------------------------
-            */
+                'last_name' =>
+                    trim(
+                        $validated['last_name']
+                    ),
 
-            'father_name' =>
-                !empty($validated['father_name'])
-                    ? trim($validated['father_name'])
-                    : null,
+                'dob' =>
+                    $dob,
 
-            'mother_name' =>
-                !empty($validated['mother_name'])
-                    ? trim($validated['mother_name'])
-                    : null,
+                'gender' =>
+                    $gender,
 
 
-            /*
-            |--------------------------------------------------------------------------
-            | Contact Details
-            |--------------------------------------------------------------------------
-            */
+                /*
+                |--------------------------------------------------------------------------
+                | Class
+                |--------------------------------------------------------------------------
+                */
 
-            'contact_no' =>
-                trim(
-                    $validated['contact_no']
-                ),
-
-            'email' =>
-                $validated['email'] ?? null,
+                'class' =>
+                    $class->name,
 
 
-            /*
-            |--------------------------------------------------------------------------
-            | School Details
-            |--------------------------------------------------------------------------
-            */
+                /*
+                |--------------------------------------------------------------------------
+                | Parent Details
+                |--------------------------------------------------------------------------
+                */
 
-            'current_school' =>
-                isset($validated['current_school'])
-                    ? trim($validated['current_school'])
-                    : null,
+                'father_name' =>
+                    !empty($validated['father_name'])
+                        ? trim($validated['father_name'])
+                        : null,
 
-
-            /*
-            |--------------------------------------------------------------------------
-            | Documents
-            |--------------------------------------------------------------------------
-            |
-            | IMPORTANT:
-            |
-            | This is now CHAR(1) in database.
-            |
-            | Only Y or N will be stored.
-            |
-            */
-
-            'all_documents_available' =>
-                $documentsAvailable,
+                'mother_name' =>
+                    !empty($validated['mother_name'])
+                        ? trim($validated['mother_name'])
+                        : null,
 
 
-            /*
-            |--------------------------------------------------------------------------
-            | Question
-            |--------------------------------------------------------------------------
-            */
+                /*
+                |--------------------------------------------------------------------------
+                | Contact Details
+                |--------------------------------------------------------------------------
+                */
 
-            'question' =>
-                $validated['question'] ?? null,
-        ]);
+                'contact_no' =>
+                    trim(
+                        $validated['contact_no']
+                    ),
+
+                'email' =>
+                    $validated['email'] ?? null,
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | School Details
+                |--------------------------------------------------------------------------
+                */
+
+                'current_school' =>
+                    isset($validated['current_school'])
+                        ? trim($validated['current_school'])
+                        : null,
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | Address
+                |--------------------------------------------------------------------------
+                */
+
+                'address' =>
+                    isset($validated['address'])
+                        ? trim($validated['address'])
+                        : null,
+
+                'pincode' =>
+                    isset($validated['pincode'])
+                        ? trim($validated['pincode'])
+                        : null,
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | Sibling
+                |--------------------------------------------------------------------------
+                */
+
+                'sibling_currently_studying' =>
+                    $siblingCurrentlyStudying,
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | Documents
+                |--------------------------------------------------------------------------
+                */
+
+                'all_documents_available' =>
+                    $documentsAvailable,
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | Question
+                |--------------------------------------------------------------------------
+                */
+
+                'question' =>
+                    $validated['question'] ?? null,
+            ]);
 
 
         /*
@@ -667,7 +757,8 @@ class AdmissionEnquiryController extends Controller
 
         return response()->json([
 
-            'success' => true,
+            'success' =>
+                true,
 
             'message' =>
                 'Admission enquiry submitted successfully.',
@@ -680,8 +771,16 @@ class AdmissionEnquiryController extends Controller
                 'enquiry_number' =>
                     $enquiry->enquiry_number,
 
+
+                /*
+                | Student
+                */
+
                 'first_name' =>
                     $enquiry->first_name,
+
+                'middle_name' =>
+                    $enquiry->middle_name,
 
                 'last_name' =>
                     $enquiry->last_name,
@@ -689,19 +788,16 @@ class AdmissionEnquiryController extends Controller
                 'dob' =>
                     $enquiry->dob,
 
-                /*
-                 * Return frontend gender.
-                 */
-
                 'gender' =>
                     $validated['gender'],
 
-                /*
-                 * Return class NAME.
-                 */
-
                 'class' =>
                     $enquiry->class,
+
+
+                /*
+                | Parent
+                */
 
                 'father_name' =>
                     $enquiry->father_name,
@@ -709,21 +805,56 @@ class AdmissionEnquiryController extends Controller
                 'mother_name' =>
                     $enquiry->mother_name,
 
+
+                /*
+                | Contact
+                */
+
                 'contact_no' =>
                     $enquiry->contact_no,
 
                 'email' =>
                     $enquiry->email,
 
+
+                /*
+                | School
+                */
+
                 'current_school' =>
                     $enquiry->current_school,
 
+
                 /*
-                 * Return Y/N.
-                 */
+                | Address
+                */
+
+                'address' =>
+                    $enquiry->address,
+
+                'pincode' =>
+                    $enquiry->pincode,
+
+
+                /*
+                | Sibling
+                */
+
+                'sibling_currently_studying' =>
+                    $enquiry->sibling_currently_studying,
+
+
+                /*
+                | Documents
+                */
 
                 'all_documents_available' =>
                     $enquiry->all_documents_available,
+
+
+                /*
+                | Question
+                */
 
                 'question' =>
                     $enquiry->question,
@@ -781,8 +912,16 @@ class AdmissionEnquiryController extends Controller
                     'enquiry_number' =>
                         $enquiry->enquiry_number,
 
+
+                    /*
+                    | Student
+                    */
+
                     'first_name' =>
                         $enquiry->first_name,
+
+                    'middle_name' =>
+                        $enquiry->middle_name,
 
                     'last_name' =>
                         $enquiry->last_name,
@@ -795,12 +934,13 @@ class AdmissionEnquiryController extends Controller
                             $enquiry->gender
                         ] ?? $enquiry->gender,
 
-                    /*
-                     * Class name.
-                     */
-
                     'class' =>
                         $enquiry->class,
+
+
+                    /*
+                    | Parent
+                    */
 
                     'father_name' =>
                         $enquiry->father_name,
@@ -808,23 +948,56 @@ class AdmissionEnquiryController extends Controller
                     'mother_name' =>
                         $enquiry->mother_name,
 
+
+                    /*
+                    | Contact
+                    */
+
                     'contact_no' =>
                         $enquiry->contact_no,
 
                     'email' =>
                         $enquiry->email,
 
+
+                    /*
+                    | School
+                    */
+
                     'current_school' =>
                         $enquiry->current_school,
 
+
                     /*
-                     * IMPORTANT:
-                     *
-                     * Return Y/N directly.
-                     */
+                    | Address
+                    */
+
+                    'address' =>
+                        $enquiry->address,
+
+                    'pincode' =>
+                        $enquiry->pincode,
+
+
+                    /*
+                    | Sibling
+                    */
+
+                    'sibling_currently_studying' =>
+                        $enquiry->sibling_currently_studying,
+
+
+                    /*
+                    | Documents
+                    */
 
                     'all_documents_available' =>
                         $enquiry->all_documents_available,
+
+
+                    /*
+                    | Question
+                    */
 
                     'question' =>
                         $enquiry->question,
@@ -841,7 +1014,8 @@ class AdmissionEnquiryController extends Controller
 
         return response()->json([
 
-            'success' => true,
+            'success' =>
+                true,
 
             'data' => [
 
@@ -872,7 +1046,8 @@ class AdmissionEnquiryController extends Controller
 
             return response()->json([
 
-                'success' => false,
+                'success' =>
+                    false,
 
                 'message' =>
                     'Admission enquiry not found.'
@@ -889,17 +1064,21 @@ class AdmissionEnquiryController extends Controller
 
         $genderMap = [
 
-            'M' => 'Male',
+            'M' =>
+                'Male',
 
-            'F' => 'Female',
+            'F' =>
+                'Female',
 
-            'O' => 'Other',
+            'O' =>
+                'Other',
         ];
 
 
         return response()->json([
 
-            'success' => true,
+            'success' =>
+                true,
 
             'data' => [
 
@@ -909,8 +1088,16 @@ class AdmissionEnquiryController extends Controller
                 'enquiry_number' =>
                     $enquiry->enquiry_number,
 
+
+                /*
+                | Student
+                */
+
                 'first_name' =>
                     $enquiry->first_name,
+
+                'middle_name' =>
+                    $enquiry->middle_name,
 
                 'last_name' =>
                     $enquiry->last_name,
@@ -923,12 +1110,13 @@ class AdmissionEnquiryController extends Controller
                         $enquiry->gender
                     ] ?? $enquiry->gender,
 
-                /*
-                 * Class NAME.
-                 */
-
                 'class' =>
                     $enquiry->class,
+
+
+                /*
+                | Parent
+                */
 
                 'father_name' =>
                     $enquiry->father_name,
@@ -936,23 +1124,56 @@ class AdmissionEnquiryController extends Controller
                 'mother_name' =>
                     $enquiry->mother_name,
 
+
+                /*
+                | Contact
+                */
+
                 'contact_no' =>
                     $enquiry->contact_no,
 
                 'email' =>
                     $enquiry->email,
 
+
+                /*
+                | School
+                */
+
                 'current_school' =>
                     $enquiry->current_school,
 
+
                 /*
-                 * IMPORTANT:
-                 *
-                 * Return Y/N directly.
-                 */
+                | Address
+                */
+
+                'address' =>
+                    $enquiry->address,
+
+                'pincode' =>
+                    $enquiry->pincode,
+
+
+                /*
+                | Sibling
+                */
+
+                'sibling_currently_studying' =>
+                    $enquiry->sibling_currently_studying,
+
+
+                /*
+                | Documents
+                */
 
                 'all_documents_available' =>
                     $enquiry->all_documents_available,
+
+
+                /*
+                | Question
+                */
 
                 'question' =>
                     $enquiry->question,
