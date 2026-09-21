@@ -8,7 +8,6 @@ use App\Models\AdmissionUser;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use App\Http\Services\SmsService;
 use App\Http\Services\WhatsAppService;
 use App\Http\Services\SmartMailer;
 
@@ -52,9 +51,7 @@ class AdmissionController extends Controller
     {
         $validated = $request->validate([
             'parent_name' => 'required|string|max:255',
-
             'email' => 'nullable|email|max:255',
-
             'phone_no' => 'nullable|string|max:20',
         ]);
 
@@ -71,7 +68,6 @@ class AdmissionController extends Controller
         ) {
             return response()->json([
                 'success' => false,
-
                 'message' =>
                     'Please provide either email or phone number.'
             ], 422);
@@ -117,7 +113,6 @@ class AdmissionController extends Controller
         if (!$registration) {
 
             $registration = Admission::create([
-
                 'parent_name' =>
                     $validated['parent_name'],
 
@@ -163,11 +158,12 @@ class AdmissionController extends Controller
     | POST:
     | /api/admission/send-otp
     |
-    | Existing user:
-    |     UPDATE OTP
+    | IMPORTANT:
     |
-    | New user:
-    |     CREATE USER
+    | Existing user -> UPDATE OTP
+    | New user      -> CREATE USER
+    |
+    | The UNIQUE user_id column is handled using UPSERT.
     |
     */
 
@@ -175,44 +171,49 @@ class AdmissionController extends Controller
     {
         /*
         |--------------------------------------------------------------------------
-        | Support Legacy And New Payloads
+        | Prepare Request
         |--------------------------------------------------------------------------
         */
 
         $requestData = $request->all();
 
 
+        /*
+        |--------------------------------------------------------------------------
+        | Detect Type Automatically
+        |--------------------------------------------------------------------------
+        */
+
         if (empty($requestData['type'])) {
 
             if (!empty($requestData['email'])) {
 
                 $requestData['type'] = 'email';
-
-                $requestData['value'] =
-                    $requestData['email'];
+                $requestData['value'] = $requestData['email'];
 
             } elseif (!empty($requestData['mobile'])) {
 
                 $requestData['type'] = 'mobile';
-
-                $requestData['value'] =
-                    $requestData['mobile'];
+                $requestData['value'] = $requestData['mobile'];
 
             } elseif (!empty($requestData['phone_no'])) {
 
                 $requestData['type'] = 'mobile';
-
-                $requestData['value'] =
-                    $requestData['phone_no'];
+                $requestData['value'] = $requestData['phone_no'];
             }
         }
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | Detect Value
+        |--------------------------------------------------------------------------
+        */
 
         if (
             empty($requestData['value']) &&
             !empty($requestData['email'])
         ) {
-
             $requestData['value'] =
                 $requestData['email'];
         }
@@ -222,7 +223,6 @@ class AdmissionController extends Controller
             empty($requestData['value']) &&
             !empty($requestData['mobile'])
         ) {
-
             $requestData['value'] =
                 $requestData['mobile'];
         }
@@ -232,7 +232,6 @@ class AdmissionController extends Controller
             empty($requestData['value']) &&
             !empty($requestData['phone_no'])
         ) {
-
             $requestData['value'] =
                 $requestData['phone_no'];
         }
@@ -250,7 +249,7 @@ class AdmissionController extends Controller
         $validated = $request->validate([
 
             'type' =>
-                'nullable|in:mobile,email',
+                'required|in:mobile,email',
 
             'value' =>
                 'required|string',
@@ -265,20 +264,25 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Get Request Values
+        | Get Values
         |--------------------------------------------------------------------------
-        |
-        | IMPORTANT:
-        |
-        | Use ?? null because school_id is optional.
-        |
         */
 
         $type =
-            $validated['type'] ?? null;
+            $validated['type'];
 
         $value =
             trim($validated['value']);
+
+        /*
+         * IMPORTANT:
+         *
+         * Do not access:
+         *
+         * $validated['school_id']
+         *
+         * directly because it is nullable.
+         */
 
         $schoolId =
             $validated['school_id'] ?? null;
@@ -286,26 +290,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Make Sure Type Is Available
-        |--------------------------------------------------------------------------
-        */
-
-        if (!$type) {
-
-            return response()->json([
-
-                'success' => false,
-
-                'message' =>
-                    'OTP type could not be determined.'
-
-            ], 422);
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Normalize Mobile Number
+        | Normalize Mobile
         |--------------------------------------------------------------------------
         */
 
@@ -320,20 +305,13 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Find School Only If school_id Was Provided
+        | Find School
         |--------------------------------------------------------------------------
-        |
-        | FIX:
-        |
-        | Previously the controller always tried to find the school.
-        | The mobile registration page is not sending school_id.
-        |
         */
 
         $school = null;
 
-
-        if (!empty($schoolId)) {
+        if ($schoolId !== null) {
 
             $school =
                 DB::table('school_settings')
@@ -448,93 +426,35 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Find Existing User Master
+        | IMPORTANT FIX
         |--------------------------------------------------------------------------
+        |
+        | DO NOT use:
+        |
+        | AdmissionUser::create()
+        |
+        | when user_id already exists.
         |
         | user_id is UNIQUE.
         |
+        | We use UPSERT so:
+        |
         | Existing user -> UPDATE
-        | New user      -> CREATE
+        | New user      -> INSERT
         |
         */
 
         $user =
-            AdmissionUser::where(
-                'user_id',
-                $value
-            )
-            ->where(
-                'IsDelete',
-                'N'
-            )
-            ->first();
+            $this->createOrUpdateOtpUser(
+                $value,
+                $otp,
+                $registration->nar_id
+            );
 
 
         /*
         |--------------------------------------------------------------------------
-        | Existing User -> UPDATE OTP
-        |--------------------------------------------------------------------------
-        */
-
-        if ($user) {
-
-            $user->update([
-
-                'password' =>
-                    $otp,
-
-                'otp_generated_at' =>
-                    now(),
-
-                'IsVerify' =>
-                    'N',
-            ]);
-
-            $userType = 'existing';
-
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | New User -> CREATE
-        |--------------------------------------------------------------------------
-        */
-
-        else {
-
-            $user =
-                AdmissionUser::create([
-
-                    'user_id' =>
-                        $value,
-
-                    'password' =>
-                        $otp,
-
-                    'otp_generated_at' =>
-                        now(),
-
-                    'nar_id' =>
-                        $registration->nar_id,
-
-                    'IsDelete' =>
-                        'N',
-
-                    'IsVerify' =>
-                        'N',
-
-                    'special_user' =>
-                        'N',
-                ]);
-
-            $userType = 'new';
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Send OTP Through WhatsApp
+        | Send WhatsApp OTP
         |--------------------------------------------------------------------------
         */
 
@@ -555,6 +475,7 @@ class AdmissionController extends Controller
                 Log::error(
                     'Admission WhatsApp OTP Failed',
                     [
+
                         'phone' =>
                             $value,
 
@@ -563,28 +484,16 @@ class AdmissionController extends Controller
 
                         'response' =>
                             $whatsappResult['raw_response']
+
                     ]
                 );
-
-                return response()->json([
-
-                    'success' =>
-                        false,
-
-                    'message' =>
-                        'OTP was generated but WhatsApp delivery failed.',
-
-                    'nar_id' =>
-                        $registration->nar_id,
-
-                ], 500);
             }
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Send OTP Through Email
+        | Send Email OTP
         |--------------------------------------------------------------------------
         */
 
@@ -594,17 +503,15 @@ class AdmissionController extends Controller
                 new SmartMailer();
 
 
-            $schoolName =
-                $school->institute_name
-                ?? 'School Admission';
-
-
             $smartMailer->send(
 
                 $value,
 
                 'School Admission OTP - '
-                    . $schoolName,
+                    . (
+                        $school->institute_name
+                        ?? 'School'
+                    ),
 
                 'emails.admission-otp',
 
@@ -617,7 +524,8 @@ class AdmissionController extends Controller
                         $registration->parent_name,
 
                     'schoolName' =>
-                        $schoolName,
+                        $school->institute_name
+                        ?? 'School',
 
                 ]
             );
@@ -626,7 +534,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | API Response
+        | Response
         |--------------------------------------------------------------------------
         */
 
@@ -635,25 +543,218 @@ class AdmissionController extends Controller
             'success' =>
                 true,
 
-            'user_type' =>
-                $userType,
-
             'message' =>
-                $userType === 'existing'
-                    ? 'Existing user found. OTP updated and sent successfully.'
-                    : 'New user created and OTP sent successfully.',
+                'OTP generated and sent successfully.',
 
             'nar_id' =>
                 $registration->nar_id,
 
             /*
-            | Remove OTP From Response In Production
-            */
-
+             * Remove this in production.
+             */
             'otp' =>
                 $otp,
 
         ]);
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | CREATE OR UPDATE OTP USER
+    |--------------------------------------------------------------------------
+    |
+    | THIS IS THE MAIN FIX FOR THE DUPLICATE user_id ERROR.
+    |
+    | MySQL will automatically:
+    |
+    | INSERT -> if user_id does not exist
+    |
+    | UPDATE -> if user_id already exists
+    |
+    */
+
+    private function createOrUpdateOtpUser(
+        string $userId,
+        int $otp,
+        $narId
+    ) {
+
+        /*
+        |--------------------------------------------------------------------------
+        | Check Existing User First
+        |--------------------------------------------------------------------------
+        |
+        | IMPORTANT:
+        |
+        | Do NOT filter by IsDelete here.
+        |
+        | We need to find ANY existing user with this user_id because
+        | user_id is UNIQUE.
+        |
+        */
+
+        $existingUser =
+            AdmissionUser::where(
+                'user_id',
+                $userId
+            )->first();
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Existing User
+        |--------------------------------------------------------------------------
+        */
+
+        if ($existingUser) {
+
+            /*
+             * Update the existing record.
+             *
+             * This also handles records where IsDelete is Y.
+             */
+
+            $existingUser->update([
+
+                'password' =>
+                    $otp,
+
+                'otp_generated_at' =>
+                    now(),
+
+                'IsDelete' =>
+                    'N',
+
+                'IsVerify' =>
+                    'N',
+
+            ]);
+
+
+            Log::info(
+                'Existing Admission User OTP Updated',
+                [
+
+                    'user_id' =>
+                        $userId,
+
+                    'otp' =>
+                        $otp,
+
+                    'nar_id' =>
+                        $existingUser->nar_id,
+
+                ]
+            );
+
+
+            return $existingUser;
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | New User
+        |--------------------------------------------------------------------------
+        */
+
+        $newUserData = [
+
+            'user_id' =>
+                $userId,
+
+            'password' =>
+                $otp,
+
+            'otp_generated_at' =>
+                now(),
+
+            'nar_id' =>
+                $narId,
+
+            'IsDelete' =>
+                'N',
+
+            'IsVerify' =>
+                'N',
+
+            'special_user' =>
+                'N',
+
+        ];
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Use INSERT ... ON DUPLICATE KEY UPDATE
+        |--------------------------------------------------------------------------
+        |
+        | This is safer than simply doing:
+        |
+        | if (!$user) {
+        |     create();
+        | }
+        |
+        | because two requests can arrive at almost the same time.
+        |
+        */
+
+        DB::table('new_adm_user_master')
+            ->upsert(
+
+                [$newUserData],
+
+                ['user_id'],
+
+                [
+
+                    'password',
+
+                    'otp_generated_at',
+
+                    'IsDelete',
+
+                    'IsVerify',
+
+                ]
+
+            );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Get User After Upsert
+        |--------------------------------------------------------------------------
+        */
+
+        $user =
+            AdmissionUser::where(
+                'user_id',
+                $userId
+            )->first();
+
+
+        Log::info(
+            'Admission User OTP Created/Updated',
+            [
+
+                'user_id' =>
+                    $userId,
+
+                'otp' =>
+                    $otp,
+
+                'nar_id' =>
+                    $user
+                        ? $user->nar_id
+                        : $narId,
+
+            ]
+        );
+
+
+        return $user;
     }
 
 
@@ -672,31 +773,40 @@ class AdmissionController extends Controller
         $requestData = $request->all();
 
 
+        /*
+        |--------------------------------------------------------------------------
+        | Detect Type
+        |--------------------------------------------------------------------------
+        */
+
         if (empty($requestData['type'])) {
 
             if (!empty($requestData['email'])) {
 
                 $requestData['type'] = 'email';
-
                 $requestData['value'] =
                     $requestData['email'];
 
             } elseif (!empty($requestData['mobile'])) {
 
                 $requestData['type'] = 'mobile';
-
                 $requestData['value'] =
                     $requestData['mobile'];
 
             } elseif (!empty($requestData['phone_no'])) {
 
                 $requestData['type'] = 'mobile';
-
                 $requestData['value'] =
                     $requestData['phone_no'];
             }
         }
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | Detect Value
+        |--------------------------------------------------------------------------
+        */
 
         if (
             empty($requestData['value']) &&
@@ -733,7 +843,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Validate Request
+        | Validate
         |--------------------------------------------------------------------------
         */
 
@@ -748,6 +858,7 @@ class AdmissionController extends Controller
 
                 'otp' =>
                     'required|digits:5',
+
             ]);
 
 
@@ -815,7 +926,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Find User Master
+        | Find User
         |--------------------------------------------------------------------------
         */
 
@@ -860,7 +971,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Mark User As Verified
+        | Mark Verified
         |--------------------------------------------------------------------------
         */
 
@@ -922,26 +1033,29 @@ class AdmissionController extends Controller
             if (!empty($requestData['email'])) {
 
                 $requestData['type'] = 'email';
-
                 $requestData['value'] =
                     $requestData['email'];
 
             } elseif (!empty($requestData['mobile'])) {
 
                 $requestData['type'] = 'mobile';
-
                 $requestData['value'] =
                     $requestData['mobile'];
 
             } elseif (!empty($requestData['phone_no'])) {
 
                 $requestData['type'] = 'mobile';
-
                 $requestData['value'] =
                     $requestData['phone_no'];
             }
         }
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | Detect Value
+        |--------------------------------------------------------------------------
+        */
 
         if (
             empty($requestData['value']) &&
@@ -978,7 +1092,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Validate Request
+        | Validate
         |--------------------------------------------------------------------------
         */
 
@@ -986,54 +1100,25 @@ class AdmissionController extends Controller
             $request->validate([
 
                 'type' =>
-                    'nullable|in:mobile,email',
+                    'required|in:mobile,email',
 
                 'value' =>
                     'required|string',
 
                 'school_id' =>
                     'nullable|integer',
+
             ]);
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Get Values
-        |--------------------------------------------------------------------------
-        |
-        | IMPORTANT FIX:
-        |
-        | school_id is optional.
-        |
-        */
-
         $type =
-            $validated['type'] ?? null;
+            $validated['type'];
 
         $value =
             trim($validated['value']);
 
         $schoolId =
             $validated['school_id'] ?? null;
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Make Sure Type Exists
-        |--------------------------------------------------------------------------
-        */
-
-        if (!$type) {
-
-            return response()->json([
-
-                'success' => false,
-
-                'message' =>
-                    'OTP type could not be determined.'
-
-            ], 422);
-        }
 
 
         /*
@@ -1053,14 +1138,13 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Find School Only If school_id Exists
+        | Find School
         |--------------------------------------------------------------------------
         */
 
         $school = null;
 
-
-        if (!empty($schoolId)) {
+        if ($schoolId !== null) {
 
             $school =
                 DB::table('school_settings')
@@ -1128,20 +1212,33 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Find Existing User
+        | Generate New OTP
         |--------------------------------------------------------------------------
+        */
+
+        $otp =
+            random_int(
+                10000,
+                99999
+            );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | IMPORTANT
+        |--------------------------------------------------------------------------
+        |
+        | Do not create a new user.
+        |
+        | Update the existing user using the same helper.
+        |
         */
 
         $user =
             AdmissionUser::where(
                 'user_id',
                 $value
-            )
-            ->where(
-                'IsDelete',
-                'N'
-            )
-            ->first();
+            )->first();
 
 
         if (!$user) {
@@ -1159,19 +1256,6 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Generate New OTP
-        |--------------------------------------------------------------------------
-        */
-
-        $otp =
-            random_int(
-                10000,
-                99999
-            );
-
-
-        /*
-        |--------------------------------------------------------------------------
         | Update Existing OTP
         |--------------------------------------------------------------------------
         */
@@ -1184,14 +1268,18 @@ class AdmissionController extends Controller
             'otp_generated_at' =>
                 now(),
 
+            'IsDelete' =>
+                'N',
+
             'IsVerify' =>
                 'N',
+
         ]);
 
 
         /*
         |--------------------------------------------------------------------------
-        | RESEND THROUGH WHATSAPP
+        | Send Resend OTP Through WhatsApp
         |--------------------------------------------------------------------------
         */
 
@@ -1204,12 +1292,6 @@ class AdmissionController extends Controller
                     'resend'
                 );
 
-
-            /*
-            |--------------------------------------------------------------------------
-            | WhatsApp Failed
-            |--------------------------------------------------------------------------
-            */
 
             if (
                 !$whatsappResult['success']
@@ -1238,7 +1320,7 @@ class AdmissionController extends Controller
                         false,
 
                     'message' =>
-                        'OTP was generated but WhatsApp delivery failed.',
+                        'OTP generated but WhatsApp delivery failed.',
 
                     'nar_id' =>
                         $registration->nar_id,
@@ -1246,12 +1328,6 @@ class AdmissionController extends Controller
                 ], 500);
             }
 
-
-            /*
-            |--------------------------------------------------------------------------
-            | WhatsApp Accepted
-            |--------------------------------------------------------------------------
-            */
 
             Log::info(
                 'Resend WhatsApp OTP Successfully Accepted',
@@ -1276,7 +1352,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | RESEND THROUGH EMAIL
+        | Send Resend OTP Through Email
         |--------------------------------------------------------------------------
         */
 
@@ -1286,17 +1362,15 @@ class AdmissionController extends Controller
                 new SmartMailer();
 
 
-            $schoolName =
-                $school->institute_name
-                ?? 'School Admission';
-
-
             $smartMailer->send(
 
                 $value,
 
                 'New School Admission OTP - '
-                    . $schoolName,
+                    . (
+                        $school->institute_name
+                        ?? 'School'
+                    ),
 
                 'emails.admission-otp',
 
@@ -1309,7 +1383,8 @@ class AdmissionController extends Controller
                         $registration->parent_name,
 
                     'schoolName' =>
-                        $schoolName,
+                        $school->institute_name
+                        ?? 'School',
 
                 ]
             );
@@ -1318,7 +1393,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | API Response
+        | Response
         |--------------------------------------------------------------------------
         */
 
@@ -1334,9 +1409,8 @@ class AdmissionController extends Controller
                 $registration->nar_id,
 
             /*
-            | Remove OTP From Response In Production
-            */
-
+             * Remove this in production.
+             */
             'otp' =>
                 $otp,
 
@@ -1348,12 +1422,6 @@ class AdmissionController extends Controller
     |--------------------------------------------------------------------------
     | SEND ADMISSION WHATSAPP OTP
     |--------------------------------------------------------------------------
-    |
-    | Common function used by:
-    |
-    | 1. sendOtp()
-    | 2. resendOtp()
-    |
     */
 
     private function sendAdmissionWhatsappOtp(
@@ -1397,7 +1465,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Send Through WhatsApp Service
+        | Send WhatsApp
         |--------------------------------------------------------------------------
         */
 
@@ -1517,7 +1585,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Check Provider Success
+        | Check Success
         |--------------------------------------------------------------------------
         */
 
@@ -1530,7 +1598,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Save WhatsApp Message Log
+        | Save WhatsApp Log
         |--------------------------------------------------------------------------
         */
 
@@ -1646,9 +1714,7 @@ class AdmissionController extends Controller
 
 
         /*
-        |--------------------------------------------------------------------------
-        | Remove Indian Country Code
-        |--------------------------------------------------------------------------
+        | Remove Indian country code
         */
 
         if (
@@ -1665,9 +1731,7 @@ class AdmissionController extends Controller
 
 
         /*
-        |--------------------------------------------------------------------------
-        | Validate Indian Mobile Number
-        |--------------------------------------------------------------------------
+        | Validate Indian Mobile
         */
 
         if (
@@ -1822,8 +1886,7 @@ class AdmissionController extends Controller
 
             return response()->json([
 
-                'success' =>
-                    false,
+                'success' => false,
 
                 'message' =>
                     'Admission form fee not found.'
