@@ -175,38 +175,71 @@ class AdmissionController extends Controller
     {
         /*
         |--------------------------------------------------------------------------
-        | Support both legacy frontend payloads and the newer API payload format.
+        | Support Legacy And New Payloads
         |--------------------------------------------------------------------------
         */
 
         $requestData = $request->all();
 
+
         if (empty($requestData['type'])) {
+
             if (!empty($requestData['email'])) {
+
                 $requestData['type'] = 'email';
-                $requestData['value'] = $requestData['email'];
+
+                $requestData['value'] =
+                    $requestData['email'];
+
             } elseif (!empty($requestData['mobile'])) {
+
                 $requestData['type'] = 'mobile';
-                $requestData['value'] = $requestData['mobile'];
+
+                $requestData['value'] =
+                    $requestData['mobile'];
+
             } elseif (!empty($requestData['phone_no'])) {
+
                 $requestData['type'] = 'mobile';
-                $requestData['value'] = $requestData['phone_no'];
+
+                $requestData['value'] =
+                    $requestData['phone_no'];
             }
         }
 
-        if (empty($requestData['value']) && !empty($requestData['email'])) {
-            $requestData['value'] = $requestData['email'];
+
+        if (
+            empty($requestData['value']) &&
+            !empty($requestData['email'])
+        ) {
+
+            $requestData['value'] =
+                $requestData['email'];
         }
 
-        if (empty($requestData['value']) && !empty($requestData['mobile'])) {
-            $requestData['value'] = $requestData['mobile'];
+
+        if (
+            empty($requestData['value']) &&
+            !empty($requestData['mobile'])
+        ) {
+
+            $requestData['value'] =
+                $requestData['mobile'];
         }
 
-        if (empty($requestData['value']) && !empty($requestData['phone_no'])) {
-            $requestData['value'] = $requestData['phone_no'];
+
+        if (
+            empty($requestData['value']) &&
+            !empty($requestData['phone_no'])
+        ) {
+
+            $requestData['value'] =
+                $requestData['phone_no'];
         }
+
 
         $request->replace($requestData);
+
 
         /*
         |--------------------------------------------------------------------------
@@ -234,16 +267,40 @@ class AdmissionController extends Controller
         |--------------------------------------------------------------------------
         | Get Request Values
         |--------------------------------------------------------------------------
+        |
+        | IMPORTANT:
+        |
+        | Use ?? null because school_id is optional.
+        |
         */
 
         $type =
-            $validated['type'];
+            $validated['type'] ?? null;
 
         $value =
             trim($validated['value']);
 
         $schoolId =
-            $validated['school_id'];
+            $validated['school_id'] ?? null;
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Make Sure Type Is Available
+        |--------------------------------------------------------------------------
+        */
+
+        if (!$type) {
+
+            return response()->json([
+
+                'success' => false,
+
+                'message' =>
+                    'OTP type could not be determined.'
+
+            ], 422);
+        }
 
 
         /*
@@ -254,39 +311,54 @@ class AdmissionController extends Controller
 
         if ($type === 'mobile') {
 
-            $value = $this->normalizeMobileNumber($value);
+            $value =
+                $this->normalizeMobileNumber(
+                    $value
+                );
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Find School
+        | Find School Only If school_id Was Provided
         |--------------------------------------------------------------------------
+        |
+        | FIX:
+        |
+        | Previously the controller always tried to find the school.
+        | The mobile registration page is not sending school_id.
+        |
         */
 
-        $school =
-            DB::table('school_settings')
-                ->where(
-                    'school_id',
-                    $schoolId
-                )
-                ->where(
-                    'is_active',
-                    'Y'
-                )
-                ->first();
+        $school = null;
 
 
-        if (!$school) {
+        if (!empty($schoolId)) {
 
-            return response()->json([
+            $school =
+                DB::table('school_settings')
+                    ->where(
+                        'school_id',
+                        $schoolId
+                    )
+                    ->where(
+                        'is_active',
+                        'Y'
+                    )
+                    ->first();
 
-                'success' => false,
 
-                'message' =>
-                    'School not found.'
+            if (!$school) {
 
-            ], 404);
+                return response()->json([
+
+                    'success' => false,
+
+                    'message' =>
+                        'School not found.'
+
+                ], 404);
+            }
         }
 
 
@@ -376,12 +448,10 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Find User Master
+        | Find Existing User Master
         |--------------------------------------------------------------------------
         |
         | user_id is UNIQUE.
-        |
-        | Therefore:
         |
         | Existing user -> UPDATE
         | New user      -> CREATE
@@ -478,12 +548,6 @@ class AdmissionController extends Controller
                 );
 
 
-            /*
-            |--------------------------------------------------------------------------
-            | Check WhatsApp Result
-            |--------------------------------------------------------------------------
-            */
-
             if (
                 !$whatsappResult['success']
             ) {
@@ -501,6 +565,19 @@ class AdmissionController extends Controller
                             $whatsappResult['raw_response']
                     ]
                 );
+
+                return response()->json([
+
+                    'success' =>
+                        false,
+
+                    'message' =>
+                        'OTP was generated but WhatsApp delivery failed.',
+
+                    'nar_id' =>
+                        $registration->nar_id,
+
+                ], 500);
             }
         }
 
@@ -517,12 +594,17 @@ class AdmissionController extends Controller
                 new SmartMailer();
 
 
+            $schoolName =
+                $school->institute_name
+                ?? 'School Admission';
+
+
             $smartMailer->send(
 
                 $value,
 
                 'School Admission OTP - '
-                    . $school->institute_name,
+                    . $schoolName,
 
                 'emails.admission-otp',
 
@@ -535,7 +617,7 @@ class AdmissionController extends Controller
                         $registration->parent_name,
 
                     'schoolName' =>
-                        $school->institute_name,
+                        $schoolName,
 
                 ]
             );
@@ -558,16 +640,14 @@ class AdmissionController extends Controller
 
             'message' =>
                 $userType === 'existing'
-                    ? 'Existing user found. OTP updated successfully.'
-                    : 'New user created and OTP generated successfully.',
+                    ? 'Existing user found. OTP updated and sent successfully.'
+                    : 'New user created and OTP sent successfully.',
 
             'nar_id' =>
                 $registration->nar_id,
 
             /*
-            |--------------------------------------------------------------------------
             | Remove OTP From Response In Production
-            |--------------------------------------------------------------------------
             */
 
             'otp' =>
@@ -591,32 +671,65 @@ class AdmissionController extends Controller
     {
         $requestData = $request->all();
 
+
         if (empty($requestData['type'])) {
+
             if (!empty($requestData['email'])) {
+
                 $requestData['type'] = 'email';
-                $requestData['value'] = $requestData['email'];
+
+                $requestData['value'] =
+                    $requestData['email'];
+
             } elseif (!empty($requestData['mobile'])) {
+
                 $requestData['type'] = 'mobile';
-                $requestData['value'] = $requestData['mobile'];
+
+                $requestData['value'] =
+                    $requestData['mobile'];
+
             } elseif (!empty($requestData['phone_no'])) {
+
                 $requestData['type'] = 'mobile';
-                $requestData['value'] = $requestData['phone_no'];
+
+                $requestData['value'] =
+                    $requestData['phone_no'];
             }
         }
 
-        if (empty($requestData['value']) && !empty($requestData['email'])) {
-            $requestData['value'] = $requestData['email'];
+
+        if (
+            empty($requestData['value']) &&
+            !empty($requestData['email'])
+        ) {
+
+            $requestData['value'] =
+                $requestData['email'];
         }
 
-        if (empty($requestData['value']) && !empty($requestData['mobile'])) {
-            $requestData['value'] = $requestData['mobile'];
+
+        if (
+            empty($requestData['value']) &&
+            !empty($requestData['mobile'])
+        ) {
+
+            $requestData['value'] =
+                $requestData['mobile'];
         }
 
-        if (empty($requestData['value']) && !empty($requestData['phone_no'])) {
-            $requestData['value'] = $requestData['phone_no'];
+
+        if (
+            empty($requestData['value']) &&
+            !empty($requestData['phone_no'])
+        ) {
+
+            $requestData['value'] =
+                $requestData['phone_no'];
         }
+
 
         $request->replace($requestData);
+
 
         /*
         |--------------------------------------------------------------------------
@@ -797,32 +910,71 @@ class AdmissionController extends Controller
     {
         $requestData = $request->all();
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | Detect Type
+        |--------------------------------------------------------------------------
+        */
+
         if (empty($requestData['type'])) {
+
             if (!empty($requestData['email'])) {
+
                 $requestData['type'] = 'email';
-                $requestData['value'] = $requestData['email'];
+
+                $requestData['value'] =
+                    $requestData['email'];
+
             } elseif (!empty($requestData['mobile'])) {
+
                 $requestData['type'] = 'mobile';
-                $requestData['value'] = $requestData['mobile'];
+
+                $requestData['value'] =
+                    $requestData['mobile'];
+
             } elseif (!empty($requestData['phone_no'])) {
+
                 $requestData['type'] = 'mobile';
-                $requestData['value'] = $requestData['phone_no'];
+
+                $requestData['value'] =
+                    $requestData['phone_no'];
             }
         }
 
-        if (empty($requestData['value']) && !empty($requestData['email'])) {
-            $requestData['value'] = $requestData['email'];
+
+        if (
+            empty($requestData['value']) &&
+            !empty($requestData['email'])
+        ) {
+
+            $requestData['value'] =
+                $requestData['email'];
         }
 
-        if (empty($requestData['value']) && !empty($requestData['mobile'])) {
-            $requestData['value'] = $requestData['mobile'];
+
+        if (
+            empty($requestData['value']) &&
+            !empty($requestData['mobile'])
+        ) {
+
+            $requestData['value'] =
+                $requestData['mobile'];
         }
 
-        if (empty($requestData['value']) && !empty($requestData['phone_no'])) {
-            $requestData['value'] = $requestData['phone_no'];
+
+        if (
+            empty($requestData['value']) &&
+            !empty($requestData['phone_no'])
+        ) {
+
+            $requestData['value'] =
+                $requestData['phone_no'];
         }
+
 
         $request->replace($requestData);
+
 
         /*
         |--------------------------------------------------------------------------
@@ -844,19 +996,49 @@ class AdmissionController extends Controller
             ]);
 
 
+        /*
+        |--------------------------------------------------------------------------
+        | Get Values
+        |--------------------------------------------------------------------------
+        |
+        | IMPORTANT FIX:
+        |
+        | school_id is optional.
+        |
+        */
+
         $type =
-            $validated['type'];
+            $validated['type'] ?? null;
 
         $value =
             trim($validated['value']);
 
         $schoolId =
-            $validated['school_id'];
+            $validated['school_id'] ?? null;
 
 
         /*
         |--------------------------------------------------------------------------
-        | Normalize Mobile Number
+        | Make Sure Type Exists
+        |--------------------------------------------------------------------------
+        */
+
+        if (!$type) {
+
+            return response()->json([
+
+                'success' => false,
+
+                'message' =>
+                    'OTP type could not be determined.'
+
+            ], 422);
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Normalize Mobile
         |--------------------------------------------------------------------------
         */
 
@@ -871,33 +1053,39 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Find School
+        | Find School Only If school_id Exists
         |--------------------------------------------------------------------------
         */
 
-        $school =
-            DB::table('school_settings')
-                ->where(
-                    'school_id',
-                    $schoolId
-                )
-                ->where(
-                    'is_active',
-                    'Y'
-                )
-                ->first();
+        $school = null;
 
 
-        if (!$school) {
+        if (!empty($schoolId)) {
 
-            return response()->json([
+            $school =
+                DB::table('school_settings')
+                    ->where(
+                        'school_id',
+                        $schoolId
+                    )
+                    ->where(
+                        'is_active',
+                        'Y'
+                    )
+                    ->first();
 
-                'success' => false,
 
-                'message' =>
-                    'School not found.'
+            if (!$school) {
 
-            ], 404);
+                return response()->json([
+
+                    'success' => false,
+
+                    'message' =>
+                        'School not found.'
+
+                ], 404);
+            }
         }
 
 
@@ -942,13 +1130,6 @@ class AdmissionController extends Controller
         |--------------------------------------------------------------------------
         | Find Existing User
         |--------------------------------------------------------------------------
-        |
-        | IMPORTANT:
-        |
-        | user_id is UNIQUE.
-        |
-        | Search by user_id only.
-        |
         */
 
         $user =
@@ -1016,18 +1197,6 @@ class AdmissionController extends Controller
 
         if ($type === 'mobile') {
 
-            /*
-            |--------------------------------------------------------------------------
-            | IMPORTANT
-            |--------------------------------------------------------------------------
-            |
-            | Use the SAME message format as sendOtp().
-            |
-            | This avoids a different WhatsApp message format being used
-            | for resend.
-            |
-            */
-
             $whatsappResult =
                 $this->sendAdmissionWhatsappOtp(
                     $value,
@@ -1049,6 +1218,7 @@ class AdmissionController extends Controller
                 Log::error(
                     'Resend WhatsApp OTP Failed',
                     [
+
                         'phone' =>
                             $value,
 
@@ -1057,6 +1227,7 @@ class AdmissionController extends Controller
 
                         'response' =>
                             $whatsappResult['raw_response']
+
                     ]
                 );
 
@@ -1115,12 +1286,17 @@ class AdmissionController extends Controller
                 new SmartMailer();
 
 
+            $schoolName =
+                $school->institute_name
+                ?? 'School Admission';
+
+
             $smartMailer->send(
 
                 $value,
 
                 'New School Admission OTP - '
-                    . $school->institute_name,
+                    . $schoolName,
 
                 'emails.admission-otp',
 
@@ -1133,7 +1309,7 @@ class AdmissionController extends Controller
                         $registration->parent_name,
 
                     'schoolName' =>
-                        $school->institute_name,
+                        $schoolName,
 
                 ]
             );
@@ -1158,9 +1334,7 @@ class AdmissionController extends Controller
                 $registration->nar_id,
 
             /*
-            |--------------------------------------------------------------------------
             | Remove OTP From Response In Production
-            |--------------------------------------------------------------------------
             */
 
             'otp' =>
@@ -1179,9 +1353,6 @@ class AdmissionController extends Controller
     |
     | 1. sendOtp()
     | 2. resendOtp()
-    |
-    | This is important because both OTP operations now use exactly
-    | the same WhatsApp sending process.
     |
     */
 
@@ -1205,7 +1376,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Use SAME message format for Send + Resend
+        | WhatsApp Message
         |--------------------------------------------------------------------------
         */
 
@@ -1243,7 +1414,6 @@ class AdmissionController extends Controller
 
                     [$message]
                 );
-
 
         } catch (\Throwable $e) {
 
@@ -1287,7 +1457,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Log Complete Raw Response
+        | Log Provider Response
         |--------------------------------------------------------------------------
         */
 
@@ -1313,27 +1483,8 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | IMPORTANT:
+        | Extract Provider Response
         |--------------------------------------------------------------------------
-        |
-        | Your actual response is:
-        |
-        | $result['response']['response']
-        |
-        | Example:
-        |
-        | [
-        |     'response' => [
-        |         'response' => [
-        |             'phone' => '919422512735',
-        |             'id' => '...',
-        |             'status' => 'success'
-        |         ]
-        |     ]
-        | ]
-        |
-        | Therefore we handle BOTH possible response structures.
-        |
         */
 
         $providerResponse =
@@ -1355,7 +1506,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Extract WhatsApp Message ID
+        | Extract Message ID
         |--------------------------------------------------------------------------
         */
 
@@ -1403,11 +1554,6 @@ class AdmissionController extends Controller
                     'message' =>
                         $message,
 
-                    /*
-                     * Delivery status will be updated
-                     * later by webhook if available.
-                     */
-
                     'status' =>
                         null,
 
@@ -1429,12 +1575,6 @@ class AdmissionController extends Controller
                 ]);
 
             } catch (\Throwable $e) {
-
-                /*
-                |--------------------------------------------------------------------------
-                | Do not fail OTP sending if logging fails.
-                |--------------------------------------------------------------------------
-                */
 
                 Log::error(
                     'WhatsApp OTP Log Insert Failed',
@@ -1483,19 +1623,6 @@ class AdmissionController extends Controller
     |--------------------------------------------------------------------------
     | Normalize Mobile Number
     |--------------------------------------------------------------------------
-    |
-    | Converts:
-    |
-    | 9422512735
-    | +919422512735
-    | 919422512735
-    |
-    | into:
-    |
-    | 9422512735
-    |
-    | The WhatsApp service can then apply its own country-code logic.
-    |
     */
 
     private function normalizeMobileNumber(
@@ -1520,7 +1647,7 @@ class AdmissionController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Remove Indian country code if supplied
+        | Remove Indian Country Code
         |--------------------------------------------------------------------------
         */
 
