@@ -74,6 +74,9 @@ class AdmissionEnquiryController extends Controller
      *
      * POST:
      * /api/admission/enquiries
+     *
+     * nar_id is currently received from the frontend,
+     * same as the current admission form approach.
      */
     public function store(Request $request)
     {
@@ -266,6 +269,18 @@ class AdmissionEnquiryController extends Controller
 
             /*
             |--------------------------------------------------------------------------
+            | Parent / Registration
+            |--------------------------------------------------------------------------
+            */
+
+            'nar_id' => [
+                'required',
+                'integer'
+            ],
+
+
+            /*
+            |--------------------------------------------------------------------------
             | Student Details
             |--------------------------------------------------------------------------
             */
@@ -419,6 +434,15 @@ class AdmissionEnquiryController extends Controller
 
         /*
         |--------------------------------------------------------------------------
+        | Get Parent nar_id
+        |--------------------------------------------------------------------------
+        */
+
+        $narId = $validated['nar_id'];
+
+
+        /*
+        |--------------------------------------------------------------------------
         | At Least One Parent Name Required
         |--------------------------------------------------------------------------
         */
@@ -469,19 +493,6 @@ class AdmissionEnquiryController extends Controller
         |--------------------------------------------------------------------------
         | Convert Gender For Database
         |--------------------------------------------------------------------------
-        |
-        | Frontend:
-        |
-        | Male
-        | Female
-        | Other
-        |
-        | Database:
-        |
-        | M
-        | F
-        | O
-        |
         */
 
         $genderMapForDatabase = [
@@ -500,15 +511,6 @@ class AdmissionEnquiryController extends Controller
         |--------------------------------------------------------------------------
         | Convert Date Of Birth
         |--------------------------------------------------------------------------
-        |
-        | Frontend:
-        |
-        | MM/DD/YYYY
-        |
-        | Database:
-        |
-        | YYYY-MM-DD
-        |
         */
 
         try {
@@ -608,6 +610,16 @@ class AdmissionEnquiryController extends Controller
 
         $enquiry =
             Enquiry::create([
+
+                /*
+                |--------------------------------------------------------------------------
+                | Parent / Registration
+                |--------------------------------------------------------------------------
+                */
+
+                'nar_id' =>
+                    $narId,
+
 
                 /*
                 |--------------------------------------------------------------------------
@@ -874,12 +886,42 @@ class AdmissionEnquiryController extends Controller
      *
      * GET:
      * /api/admission/enquiries
+     *
+     * The frontend sends nar_id for now,
+     * matching the existing form implementation.
+     *
+     * Only enquiries belonging to that nar_id are returned.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $enquiries =
-            Enquiry::orderByDesc('id')
-                ->get();
+        /*
+        |--------------------------------------------------------------------------
+        | Validate nar_id
+        |--------------------------------------------------------------------------
+        */
+
+        $validated = $request->validate([
+            'nar_id' => [
+                'required',
+                'integer'
+            ]
+        ]);
+
+        $narId = $validated['nar_id'];
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Get Only This Parent's Enquiries
+        |--------------------------------------------------------------------------
+        */
+
+        $enquiries = Enquiry::where(
+            'nar_id',
+            $narId
+        )
+        ->orderByDesc('id')
+        ->get();
 
 
         /*
@@ -1035,11 +1077,43 @@ class AdmissionEnquiryController extends Controller
      *
      * GET:
      * /api/admission/enquiries/{id}
+     *
+     * nar_id is also checked here so a parent can only
+     * access their own enquiry.
      */
-    public function show($id)
+    public function show(Request $request, $id)
     {
-        $enquiry =
-            Enquiry::find($id);
+        /*
+        |--------------------------------------------------------------------------
+        | Validate nar_id
+        |--------------------------------------------------------------------------
+        */
+
+        $validated = $request->validate([
+            'nar_id' => [
+                'required',
+                'integer'
+            ]
+        ]);
+
+        $narId = $validated['nar_id'];
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Find Enquiry For This Parent Only
+        |--------------------------------------------------------------------------
+        */
+
+        $enquiry = Enquiry::where(
+            'id',
+            $id
+        )
+        ->where(
+            'nar_id',
+            $narId
+        )
+        ->first();
 
 
         if (!$enquiry) {
@@ -1074,6 +1148,12 @@ class AdmissionEnquiryController extends Controller
                 'Other',
         ];
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | Response
+        |--------------------------------------------------------------------------
+        */
 
         return response()->json([
 

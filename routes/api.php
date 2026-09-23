@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\AdmissionDocumentController;
 use App\Http\Controllers\Api\AdmissionPaymentController;
 use App\Http\Controllers\Api\AdmissionDocumentTypeController;
 use App\Http\Controllers\Api\AdmissionEnquiryController;
+use App\Http\Controllers\Api\AdmissionSignatureController;
 
 
 
@@ -131,4 +132,13 @@ Route::get(
 Route::get(
     '/admission/enquiry/genders',
     [AdmissionEnquiryController::class, 'getGenders']
+);
+Route::post(
+    '/admission/signature',
+    [AdmissionSignatureController::class, 'saveSignature']
+);
+
+Route::get(
+    '/admission/signature/{formId}',
+    [AdmissionSignatureController::class, 'getSignature']
 );

@@ -20,6 +20,7 @@ class Enquiry extends Model
      * Fields that can be mass assigned.
      */
     protected $fillable = [
+    'nar_id',
     'enquiry_number',
 
     'first_name',

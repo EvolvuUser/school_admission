@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use App\Models\AdmissionSignature;
 
 class OnlineAdmissionForm extends Model
 {
@@ -89,4 +90,13 @@ class OnlineAdmissionForm extends Model
         'student_id',
         'application_date',
     ];
+
+    public function signature()
+{
+    return $this->hasOne(
+        AdmissionSignature::class,
+        'form_id',
+        'form_id'
+    );
+}
 }
