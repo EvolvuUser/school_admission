@@ -13,6 +13,7 @@ class AdmissionDocumentType extends Model
     protected $fillable = [
         'code',
         'name',
+        'is_required',
         'is_active',
     ];
 }

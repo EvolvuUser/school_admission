@@ -24,6 +24,7 @@ class AdmissionDocumentTypeController extends Controller
                 'id',
                 'code',
                 'name',
+                'is_required',
                 'is_active',
             ]);
 

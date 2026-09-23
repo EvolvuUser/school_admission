@@ -80,6 +80,12 @@ class AdmissionEnquiryController extends Controller
      */
     public function store(Request $request)
     {
+
+        if (!$request->has('nar_id') && $request->has('narId')) {
+    $request->merge([
+        'nar_id' => $request->input('narId')
+    ]);
+}
         /*
         |--------------------------------------------------------------------------
         | Normalize Gender
