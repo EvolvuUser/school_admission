@@ -12,6 +12,51 @@ class AdmissionEnquiryController extends Controller
 {
     /**
      * ============================================================
+     * RESOLVE nar_id FROM WHATEVER KEY NAME THE FRONTEND SENT
+     * ============================================================
+     *
+     * The frontend has, at different points, sent the logged-in
+     * parent's identifier as any of:
+     *
+     * nar_id
+     * narId
+     * user_id
+     * userId
+     * parent_id
+     * parentId
+     *
+     * Rather than breaking every time the frontend uses a
+     * different key name, we normalize all of these onto
+     * 'nar_id' before validation runs. First matching key wins.
+     */
+    private function resolveNarId(Request $request): void
+    {
+        if ($request->has('nar_id')) {
+            return;
+        }
+
+        foreach ([
+            'narId',
+            'user_id',
+            'userId',
+            'parent_id',
+            'parentId',
+        ] as $alternateKey) {
+
+            if ($request->has($alternateKey)) {
+
+                $request->merge([
+                    'nar_id' => $request->input($alternateKey)
+                ]);
+
+                return;
+            }
+        }
+    }
+
+
+    /**
+     * ============================================================
      * GET ALL CLASSES
      * ============================================================
      *
@@ -81,11 +126,8 @@ class AdmissionEnquiryController extends Controller
     public function store(Request $request)
     {
 
-        if (!$request->has('nar_id') && $request->has('narId')) {
-    $request->merge([
-        'nar_id' => $request->input('narId')
-    ]);
-}
+        $this->resolveNarId($request);
+
         /*
         |--------------------------------------------------------------------------
         | Normalize Gender
@@ -905,16 +947,11 @@ class AdmissionEnquiryController extends Controller
     {
         /*
         |--------------------------------------------------------------------------
-        | Accept narId As A Fallback For nar_id
+        | Accept Whatever Key Name The Frontend Sent For nar_id
         |--------------------------------------------------------------------------
         */
 
-        if (!$request->has('nar_id') && $request->has('narId')) {
-
-            $request->merge([
-                'nar_id' => $request->input('narId')
-            ]);
-        }
+        $this->resolveNarId($request);
 
 
         /*
@@ -1111,16 +1148,11 @@ class AdmissionEnquiryController extends Controller
     {
         /*
         |--------------------------------------------------------------------------
-        | Accept narId As A Fallback For nar_id
+        | Accept Whatever Key Name The Frontend Sent For nar_id
         |--------------------------------------------------------------------------
         */
 
-        if (!$request->has('nar_id') && $request->has('narId')) {
-
-            $request->merge([
-                'nar_id' => $request->input('narId')
-            ]);
-        }
+        $this->resolveNarId($request);
 
 
         /*

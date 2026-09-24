@@ -367,324 +367,422 @@ class AdmissionDocumentController extends Controller
         ], 201);
     }
 
-    /**
-     * Get all uploaded documents and required document status
-     * for an admission form.
-     *
-     * GET:
-     *
-     * /api/admission/online-form/{formId}/documents?nar_id=2856
-     */
-    public function index(Request $request, $formId)
-    {
-        /*
-        |--------------------------------------------------------------------------
-        | Validate request
-        |--------------------------------------------------------------------------
-        */
+public function index(Request $request, $formId)
+{
+    /*
+    |--------------------------------------------------------------------------
+    | Validate request
+    |--------------------------------------------------------------------------
+    */
 
-        $validated = $request->validate([
-            'nar_id' => [
-                'required',
-                'integer'
-            ]
-        ]);
+    $validated = $request->validate([
+        'nar_id' => [
+            'required',
+            'integer'
+        ]
+    ]);
 
-        /*
-        |--------------------------------------------------------------------------
-        | Check admission form
-        |--------------------------------------------------------------------------
-        */
 
-        $student = OnlineAdmissionForm::where(
-            'form_id',
-            $formId
-        )->first();
+    /*
+    |--------------------------------------------------------------------------
+    | Check admission form
+    |--------------------------------------------------------------------------
+    */
 
-        if (!$student) {
+    $student = OnlineAdmissionForm::where(
+        'form_id',
+        $formId
+    )->first();
 
-            return response()->json([
-                'success' => false,
-                'message' =>
-                    'Online admission form not found.'
-            ], 404);
-        }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Authorization
-        |--------------------------------------------------------------------------
-        */
+    if (!$student) {
 
-        if (
-            (int) $student->nar_id !==
-            (int) $validated['nar_id']
-        ) {
+        return response()->json([
+            'success' => false,
+            'message' =>
+                'Online admission form not found.'
+        ], 404);
+    }
 
-            return response()->json([
-                'success' => false,
-                'message' =>
-                    'You are not authorized to access this admission form.'
-            ], 403);
-        }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Get Uploaded Documents
-        |--------------------------------------------------------------------------
-        */
+    /*
+    |--------------------------------------------------------------------------
+    | Authorization
+    |--------------------------------------------------------------------------
+    */
 
-        $documents = AdmissionUploadDocument::where(
-            'form_id',
-            $formId
-        )->get();
+    if (
+        (int) $student->nar_id !==
+        (int) $validated['nar_id']
+    ) {
 
-        /*
-        |--------------------------------------------------------------------------
-        | Get Active Document Types
-        |--------------------------------------------------------------------------
-        |
-        | All document types and required flags are taken
-        | dynamically from admission_document_types.
-        |
-        */
+        return response()->json([
+            'success' => false,
+            'message' =>
+                'You are not authorized to access this admission form.'
+        ], 403);
+    }
 
-        $documentTypes = AdmissionDocumentType::where(
-            'is_active',
-            'Y'
-        )
-            ->orderBy('id')
-            ->get();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Create Uploaded Document Code List
-        |--------------------------------------------------------------------------
-        */
+    /*
+    |--------------------------------------------------------------------------
+    | Get Uploaded Documents
+    |--------------------------------------------------------------------------
+    */
 
-        $uploadedDocumentCodes = $documents
-            ->pluck('doc_type')
-            ->map(function ($code) {
+    $documents = AdmissionUploadDocument::where(
+        'form_id',
+        $formId
+    )->get();
 
-                return strtoupper(
-                    trim($code)
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get ALL Active Document Types
+    |--------------------------------------------------------------------------
+    |
+    | IMPORTANT:
+    |
+    | We get all active documents here.
+    |
+    | We DO NOT filter by is_required = Y.
+    |
+    | Therefore both required and optional documents
+    | will be returned.
+    |
+    */
+
+    $documentTypes = AdmissionDocumentType::where(
+        'is_active',
+        'Y'
+    )
+        ->orderBy('id')
+        ->get();
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Create Uploaded Document Code List
+    |--------------------------------------------------------------------------
+    */
+
+    $uploadedDocumentCodes = $documents
+        ->pluck('doc_type')
+        ->map(function ($code) {
+
+            return strtoupper(
+                trim($code)
+            );
+
+        })
+        ->unique()
+        ->values();
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Add Information To Uploaded Documents
+    |--------------------------------------------------------------------------
+    |
+    | This keeps the uploaded documents section useful.
+    |
+    | Every uploaded document gets:
+    |
+    | - document_type
+    | - is_required
+    | - document_url
+    |
+    */
+
+    $documents->transform(
+        function ($document) use ($documentTypes) {
+
+            $documentType = $documentTypes->first(
+                function ($type) use ($document) {
+
+                    return strtoupper(
+                        trim($type->code)
+                    ) === strtoupper(
+                        trim($document->doc_type)
+                    );
+                }
+            );
+
+
+            /*
+            |------------------------------------------------------------------
+            | Document Name
+            |------------------------------------------------------------------
+            */
+
+            $document->document_type =
+                $documentType
+                    ? $documentType->name
+                    : 'Unknown';
+
+
+            /*
+            |------------------------------------------------------------------
+            | Required / Optional
+            |------------------------------------------------------------------
+            */
+
+            $document->is_required =
+                $documentType
+                    ? $documentType->is_required
+                    : 'N';
+
+
+            /*
+            |------------------------------------------------------------------
+            | Uploaded
+            |------------------------------------------------------------------
+            */
+
+            $document->uploaded = true;
+
+
+            /*
+            |------------------------------------------------------------------
+            | Document URL
+            |------------------------------------------------------------------
+            */
+
+            $document->document_url =
+                asset(
+                    'storage/admission_documents/' .
+                    $document->image_name
                 );
 
-            })
-            ->unique()
-            ->values();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Add Document Type Information To Uploaded Documents
-        |--------------------------------------------------------------------------
-        */
+            return $document;
+        }
+    );
 
-        $documents->transform(
-            function ($document) use ($documentTypes) {
 
-                $documentType = $documentTypes->firstWhere(
-                    'code',
+    /*
+    |--------------------------------------------------------------------------
+    | Build COMPLETE Document Status List
+    |--------------------------------------------------------------------------
+    |
+    | IMPORTANT:
+    |
+    | This contains ALL active documents.
+    |
+    | Example:
+    |
+    | BC   -> required -> uploaded
+    | PS   -> required -> not uploaded
+    | FP   -> optional -> not uploaded
+    | SC   -> optional -> not uploaded
+    | BPSC -> optional -> not uploaded
+    | AC   -> optional -> not uploaded
+    | CC   -> optional -> not uploaded
+    | PC   -> optional -> not uploaded
+    |
+    */
+
+    $allDocuments = $documentTypes
+        ->map(function ($documentType) use (
+            $uploadedDocumentCodes
+        ) {
+
+            $isUploaded =
+                $uploadedDocumentCodes->contains(
                     strtoupper(
-                        trim($document->doc_type)
+                        trim($documentType->code)
                     )
                 );
 
-                /*
-                |------------------------------------------------------------------
-                | Document Name
-                |------------------------------------------------------------------
-                */
 
-                $document->document_type =
-                    $documentType
-                        ? $documentType->name
-                        : 'Unknown';
+            return [
 
-                /*
-                |------------------------------------------------------------------
-                | Required Status
-                |------------------------------------------------------------------
-                */
+                'id' =>
+                    $documentType->id,
 
-                $document->is_required =
-                    $documentType
-                        ? $documentType->is_required
-                        : 'N';
+                'code' =>
+                    $documentType->code,
 
-                /*
-                |------------------------------------------------------------------
-                | Document URL
-                |------------------------------------------------------------------
-                */
+                'name' =>
+                    $documentType->name,
 
-                $document->document_url =
-                    asset(
-                        'storage/admission_documents/' .
-                        $document->image_name
-                    );
+                'is_required' =>
+                    $documentType->is_required,
 
-                return $document;
-            }
-        );
+                'is_active' =>
+                    $documentType->is_active,
 
-        /*
-        |--------------------------------------------------------------------------
-        | Get Required Documents
-        |--------------------------------------------------------------------------
-        |
-        | No document codes such as BC or PS are hardcoded.
-        |
-        | Any document with:
-        |
-        | is_required = Y
-        |
-        | is treated as a required document.
-        |
-        */
+                'uploaded' =>
+                    $isUploaded,
 
-        $requiredDocumentTypes = $documentTypes
-            ->where('is_required', 'Y')
-            ->values();
+            ];
 
-        /*
-        |--------------------------------------------------------------------------
-        | Check Required Documents
-        |--------------------------------------------------------------------------
-        */
+        })
+        ->values();
 
-        $requiredDocuments = $requiredDocumentTypes
-            ->map(function ($documentType) use (
-                $uploadedDocumentCodes
-            ) {
 
-                $isUploaded =
-                    $uploadedDocumentCodes->contains(
-                        strtoupper(
-                            trim($documentType->code)
-                        )
-                    );
+    /*
+    |--------------------------------------------------------------------------
+    | Required Documents
+    |--------------------------------------------------------------------------
+    |
+    | This is only the required subset of allDocuments.
+    |
+    */
 
-                return [
+    $requiredDocuments = $allDocuments
+        ->where('is_required', 'Y')
+        ->values();
 
-                    'id' =>
-                        $documentType->id,
 
-                    'code' =>
-                        $documentType->code,
+    /*
+    |--------------------------------------------------------------------------
+    | Optional Documents
+    |--------------------------------------------------------------------------
+    |
+    | This is only the optional subset of allDocuments.
+    |
+    */
 
-                    'name' =>
-                        $documentType->name,
+    $optionalDocuments = $allDocuments
+        ->where('is_required', 'N')
+        ->values();
 
-                    'is_required' =>
-                        $documentType->is_required,
 
-                    'uploaded' =>
-                        $isUploaded,
+    /*
+    |--------------------------------------------------------------------------
+    | Missing Required Documents
+    |--------------------------------------------------------------------------
+    |
+    | Only required documents which have NOT been uploaded.
+    |
+    */
 
-                ];
+    $missingRequiredDocuments = $requiredDocuments
+        ->filter(function ($document) {
 
-            })
-            ->values();
+            return $document['uploaded'] === false;
 
-        /*
-        |--------------------------------------------------------------------------
-        | Find Missing Required Documents
-        |--------------------------------------------------------------------------
-        */
+        })
+        ->values();
 
-        $missingRequiredDocuments = $requiredDocuments
-            ->filter(function ($document) {
 
-                return $document['uploaded'] === false;
+    /*
+    |--------------------------------------------------------------------------
+    | Check Required Document Completion
+    |--------------------------------------------------------------------------
+    */
 
-            })
-            ->values();
+    $allRequiredDocumentsUploaded =
+        $missingRequiredDocuments->isEmpty();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Check Whether All Required Documents Are Uploaded
-        |--------------------------------------------------------------------------
-        */
 
-        $allRequiredDocumentsUploaded =
-            $missingRequiredDocuments->isEmpty();
+    /*
+    |--------------------------------------------------------------------------
+    | Response
+    |--------------------------------------------------------------------------
+    */
 
-        /*
-        |--------------------------------------------------------------------------
-        | Response
-        |--------------------------------------------------------------------------
-        */
+    return response()->json([
 
-        return response()->json([
+        'success' => true,
 
-            'success' => true,
+        'data' => [
 
-            'data' => [
+            /*
+            |------------------------------------------------------------------
+            | Form
+            |------------------------------------------------------------------
+            */
 
-                /*
-                |------------------------------------------------------------------
-                | Form
-                |------------------------------------------------------------------
-                */
+            'form_id' =>
+                $formId,
 
-                'form_id' =>
-                    $formId,
 
-                /*
-                |------------------------------------------------------------------
-                | Uploaded Documents
-                |------------------------------------------------------------------
-                */
+            /*
+            |------------------------------------------------------------------
+            | Uploaded Documents
+            |------------------------------------------------------------------
+            */
 
-                'documents' =>
-                    $documents,
+            'documents' =>
+                $documents,
 
-                /*
-                |------------------------------------------------------------------
-                | Required Documents
-                |------------------------------------------------------------------
-                */
 
-                'required_documents' =>
-                    $requiredDocuments,
+            /*
+            |------------------------------------------------------------------
+            | ALL Documents
+            |------------------------------------------------------------------
+            |
+            | This is the important new section.
+            |
+            | It contains all 8 documents with:
+            |
+            | is_required
+            | uploaded
+            |
+            */
 
-                /*
-                |------------------------------------------------------------------
-                | Missing Required Documents
-                |------------------------------------------------------------------
-                */
+            'all_documents' =>
+                $allDocuments,
 
-                'missing_required_documents' =>
-                    $missingRequiredDocuments,
 
-                /*
-                |------------------------------------------------------------------
-                | Final Check
-                |------------------------------------------------------------------
-                */
+            /*
+            |------------------------------------------------------------------
+            | Required Documents
+            |------------------------------------------------------------------
+            */
 
-                'all_required_documents_uploaded' =>
-                    $allRequiredDocumentsUploaded,
+            'required_documents' =>
+                $requiredDocuments,
 
-                /*
-                |------------------------------------------------------------------
-                | Existing Admission Status
-                |------------------------------------------------------------------
-                |
-                | Status is only returned.
-                | It is NOT changed by this controller.
-                |
-                */
 
-                'admission_form_status' =>
-                    $student->admission_form_status,
+            /*
+            |------------------------------------------------------------------
+            | Optional Documents
+            |------------------------------------------------------------------
+            */
 
-            ]
+            'optional_documents' =>
+                $optionalDocuments,
 
-        ]);
-    }
 
+            /*
+            |------------------------------------------------------------------
+            | Missing Required Documents
+            |------------------------------------------------------------------
+            */
+
+            'missing_required_documents' =>
+                $missingRequiredDocuments,
+
+
+            /*
+            |------------------------------------------------------------------
+            | Required Document Completion
+            |------------------------------------------------------------------
+            */
+
+            'all_required_documents_uploaded' =>
+                $allRequiredDocumentsUploaded,
+
+
+            /*
+            |------------------------------------------------------------------
+            | Existing Admission Status
+            |------------------------------------------------------------------
+            |
+            | This controller does NOT change the status.
+            |
+            */
+
+            'admission_form_status' =>
+                $student->admission_form_status,
+
+        ]
+
+    ]);
+}
     /**
      * View / download a specific document.
      *
