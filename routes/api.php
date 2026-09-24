@@ -14,7 +14,7 @@ use App\Http\Controllers\Api\AdmissionEnquiryController;
 use App\Http\Controllers\Api\AdmissionSignatureController;
 
 
-
+Route::get('/admission/registration/check-user', [AdmissionController::class, 'checkExistingUser']);
 Route::get('/admission/registration/{narId}', [AdmissionController::class, 'getRegistrationDetails']);
 Route::post('/admission/registration', [AdmissionController::class, 'createRegistration']);
 Route::post('/admission/send-otp', [AdmissionController::class, 'sendOtp']);

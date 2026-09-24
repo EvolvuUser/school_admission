@@ -2119,4 +2119,172 @@ public function getDashboard(Request $request)
 
     ]);
 }
+    public function checkExistingUser(Request $request)
+    {
+        /*
+        |--------------------------------------------------------------------------
+        | Prepare Request (Same Flexible Input Style As sendOtp)
+        |--------------------------------------------------------------------------
+        */
+
+        $requestData = $request->all();
+
+        if (empty($requestData['type'])) {
+
+            if (!empty($requestData['email'])) {
+
+                $requestData['type'] = 'email';
+
+                $requestData['value'] =
+                    $requestData['email'];
+
+            } elseif (!empty($requestData['mobile'])) {
+
+                $requestData['type'] = 'mobile';
+
+                $requestData['value'] =
+                    $requestData['mobile'];
+
+            } elseif (!empty($requestData['phone_no'])) {
+
+                $requestData['type'] = 'mobile';
+
+                $requestData['value'] =
+                    $requestData['phone_no'];
+            }
+        }
+
+        if (
+            empty($requestData['value']) &&
+            !empty($requestData['email'])
+        ) {
+
+            $requestData['value'] =
+                $requestData['email'];
+        }
+
+        if (
+            empty($requestData['value']) &&
+            !empty($requestData['mobile'])
+        ) {
+
+            $requestData['value'] =
+                $requestData['mobile'];
+        }
+
+        if (
+            empty($requestData['value']) &&
+            !empty($requestData['phone_no'])
+        ) {
+
+            $requestData['value'] =
+                $requestData['phone_no'];
+        }
+
+        $request->replace($requestData);
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Validate Request
+        |--------------------------------------------------------------------------
+        */
+
+        $validated = $request->validate([
+
+            'type' =>
+                'required|in:mobile,email',
+
+            'value' =>
+                'required|string',
+
+        ]);
+
+        $type =
+            $validated['type'];
+
+        $value =
+            trim($validated['value']);
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Normalize Mobile
+        |--------------------------------------------------------------------------
+        */
+
+        if ($type === 'mobile') {
+
+            $value =
+                $this->normalizeMobileNumber(
+                    $value
+                );
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Look Up Existing Registration
+        |--------------------------------------------------------------------------
+        */
+
+        if ($type === 'mobile') {
+
+            $registration =
+                Admission::where(
+                    'phone_no',
+                    $value
+                )->first();
+
+        } else {
+
+            $registration =
+                Admission::where(
+                    'email',
+                    $value
+                )->first();
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Response
+        |--------------------------------------------------------------------------
+        */
+
+        if (!$registration) {
+
+            return response()->json([
+
+                'success' => true,
+
+                'data' => [
+
+                    'exists' => false,
+
+                    'parent_name' => null,
+
+                    'nar_id' => null,
+                ],
+
+            ]);
+        }
+
+        return response()->json([
+
+            'success' => true,
+
+            'data' => [
+
+                'exists' => true,
+
+                'parent_name' =>
+                    $registration->parent_name,
+
+                'nar_id' =>
+                    $registration->nar_id,
+            ],
+
+        ]);
+    }
 }

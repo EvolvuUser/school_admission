@@ -891,15 +891,32 @@ class AdmissionEnquiryController extends Controller
      * ============================================================
      *
      * GET:
-     * /api/admission/enquiries
+     * /api/admission/enquiries?nar_id=2856
      *
      * The frontend sends nar_id for now,
      * matching the existing form implementation.
+     *
+     * Also supports narId for frontend compatibility,
+     * same as the online admission form endpoints.
      *
      * Only enquiries belonging to that nar_id are returned.
      */
     public function index(Request $request)
     {
+        /*
+        |--------------------------------------------------------------------------
+        | Accept narId As A Fallback For nar_id
+        |--------------------------------------------------------------------------
+        */
+
+        if (!$request->has('nar_id') && $request->has('narId')) {
+
+            $request->merge([
+                'nar_id' => $request->input('narId')
+            ]);
+        }
+
+
         /*
         |--------------------------------------------------------------------------
         | Validate nar_id
@@ -1082,13 +1099,30 @@ class AdmissionEnquiryController extends Controller
      * ============================================================
      *
      * GET:
-     * /api/admission/enquiries/{id}
+     * /api/admission/enquiries/{id}?nar_id=2856
+     *
+     * Also supports narId for frontend compatibility,
+     * same as the online admission form endpoints.
      *
      * nar_id is also checked here so a parent can only
      * access their own enquiry.
      */
     public function show(Request $request, $id)
     {
+        /*
+        |--------------------------------------------------------------------------
+        | Accept narId As A Fallback For nar_id
+        |--------------------------------------------------------------------------
+        */
+
+        if (!$request->has('nar_id') && $request->has('narId')) {
+
+            $request->merge([
+                'nar_id' => $request->input('narId')
+            ]);
+        }
+
+
         /*
         |--------------------------------------------------------------------------
         | Validate nar_id
