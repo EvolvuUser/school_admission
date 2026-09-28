@@ -3,18 +3,31 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Models\AdmissionForm;
 use App\Models\OnlineAdmissionForm;
+use App\Models\AdmissionDocumentType;
+use App\Models\AdmissionUploadDocument;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class AdmissionFormController extends Controller
 {
     /**
-     * Get admission form details by form ID and academic year.
+     * ============================================================
+     * Get Admission Form Details
+     * ============================================================
      *
      * GET:
      * /api/admission/form/{formId}?academic_yr=2026-2027
+     *
+     * This API returns:
+     *
+     * - Admission form information
+     * - Form configuration
+     * - Required documents
+     * - Optional documents
+     * - Uploaded status of each document
+     * - Document URL when uploaded
      */
     public function getFormDetails(Request $request, $formId)
     {
@@ -27,6 +40,12 @@ class AdmissionFormController extends Controller
             ], 422);
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | Find Admission Form
+        |--------------------------------------------------------------------------
+        */
+
         $form = AdmissionForm::where('form_id', $formId)
             ->where('academic_yr', $academicYear)
             ->where('is_active', 'Y')
@@ -35,14 +54,161 @@ class AdmissionFormController extends Controller
         if (!$form) {
             return response()->json([
                 'success' => false,
-                'message' => 'Admission form not found for this form ID and academic year.'
+                'message' =>
+                    'Admission form not found for this form ID and academic year.'
             ], 404);
         }
+
+        /*
+        |--------------------------------------------------------------------------
+        | Get All Active Document Types
+        |--------------------------------------------------------------------------
+        |
+        | Documents are completely dynamic.
+        |
+        | No document code is hardcoded here.
+        |
+        */
+
+        $documentTypes = AdmissionDocumentType::where('is_active', 'Y')
+            ->orderBy('id')
+            ->get();
+
+        /*
+        |--------------------------------------------------------------------------
+        | Check Existing Student Application
+        |--------------------------------------------------------------------------
+        |
+        | If this form_id already exists in online_admission_form,
+        | we check which documents have already been uploaded.
+        |
+        */
+
+        $uploadedDocuments = AdmissionUploadDocument::where(
+            'form_id',
+            $formId
+        )->get();
+
+        /*
+        |--------------------------------------------------------------------------
+        | Create Uploaded Document Lookup
+        |--------------------------------------------------------------------------
+        */
+
+        $uploadedDocumentsByCode = $uploadedDocuments->keyBy(function ($document) {
+            return strtoupper(trim($document->doc_type));
+        });
+
+        /*
+        |--------------------------------------------------------------------------
+        | Build Complete Document List
+        |--------------------------------------------------------------------------
+        |
+        | IMPORTANT:
+        |
+        | Every active document type is returned.
+        |
+        | Therefore the frontend will see documents even when
+        | nothing has been uploaded yet.
+        |
+        */
+
+        $documents = $documentTypes->map(function ($documentType) use (
+            $uploadedDocumentsByCode
+        ) {
+
+            $code = strtoupper(trim($documentType->code));
+
+            $uploadedDocument = $uploadedDocumentsByCode->get($code);
+
+            $isUploaded = $uploadedDocument !== null;
+
+            $documentUrl = null;
+
+            if ($uploadedDocument) {
+                $documentUrl = asset(
+                    'storage/admission_documents/' .
+                    $uploadedDocument->image_name
+                );
+            }
+
+            return [
+                'id' => $documentType->id,
+
+                'code' => $documentType->code,
+
+                'name' => $documentType->name,
+
+                'is_required' => $documentType->is_required,
+
+                'is_active' => $documentType->is_active,
+
+                'uploaded' => $isUploaded,
+
+                'image_name' => $uploadedDocument
+                    ? $uploadedDocument->image_name
+                    : null,
+
+                'document_url' => $documentUrl,
+            ];
+        })->values();
+
+        /*
+        |--------------------------------------------------------------------------
+        | Required Documents
+        |--------------------------------------------------------------------------
+        */
+
+        $requiredDocuments = $documents
+            ->where('is_required', 'Y')
+            ->values();
+
+        /*
+        |--------------------------------------------------------------------------
+        | Optional Documents
+        |--------------------------------------------------------------------------
+        */
+
+        $optionalDocuments = $documents
+            ->where('is_required', 'N')
+            ->values();
+
+        /*
+        |--------------------------------------------------------------------------
+        | Missing Required Documents
+        |--------------------------------------------------------------------------
+        */
+
+        $missingRequiredDocuments = $requiredDocuments
+            ->where('uploaded', false)
+            ->values();
+
+        /*
+        |--------------------------------------------------------------------------
+        | Check Whether All Required Documents Are Uploaded
+        |--------------------------------------------------------------------------
+        */
+
+        $allRequiredDocumentsUploaded =
+            $missingRequiredDocuments->isEmpty();
+
+        /*
+        |--------------------------------------------------------------------------
+        | Final Response
+        |--------------------------------------------------------------------------
+        */
 
         return response()->json([
             'success' => true,
 
             'data' => [
+
+                /*
+                |--------------------------------------------------------------------------
+                | Admission Form
+                |--------------------------------------------------------------------------
+                */
+
                 'form_id' => $form->form_id,
 
                 'class_id' => $form->class_id,
@@ -53,7 +219,14 @@ class AdmissionFormController extends Controller
 
                 'form_description' => $form->form_description,
 
+                /*
+                |--------------------------------------------------------------------------
+                | Form Configuration
+                |--------------------------------------------------------------------------
+                */
+
                 'form_configuration' => [
+
                     'student_details' =>
                         $form->student_details_enabled === 'Y',
 
@@ -62,23 +235,64 @@ class AdmissionFormController extends Controller
 
                     'additional_details' =>
                         $form->additional_details_enabled === 'Y',
-                ]
+                ],
+
+                /*
+                |--------------------------------------------------------------------------
+                | ALL Documents
+                |--------------------------------------------------------------------------
+                |
+                | This is the important addition.
+                |
+                */
+
+                'documents' => $documents,
+
+                /*
+                |--------------------------------------------------------------------------
+                | Required Documents
+                |--------------------------------------------------------------------------
+                */
+
+                'required_documents' => $requiredDocuments,
+
+                /*
+                |--------------------------------------------------------------------------
+                | Optional Documents
+                |--------------------------------------------------------------------------
+                */
+
+                'optional_documents' => $optionalDocuments,
+
+                /*
+                |--------------------------------------------------------------------------
+                | Missing Required Documents
+                |--------------------------------------------------------------------------
+                */
+
+                'missing_required_documents' =>
+                    $missingRequiredDocuments,
+
+                /*
+                |--------------------------------------------------------------------------
+                | Required Document Completion
+                |--------------------------------------------------------------------------
+                */
+
+                'all_required_documents_uploaded' =>
+                    $allRequiredDocumentsUploaded,
             ]
         ]);
     }
 
 
     /**
+     * ============================================================
      * Save Student Details
+     * ============================================================
      *
      * POST:
      * /api/admission/student-details
-     *
-     * The user sends:
-     * - class_id
-     * - academic_yr
-     * - student details
-     * - address details
      *
      * form_id is generated automatically.
      */
@@ -105,7 +319,9 @@ class AdmissionFormController extends Controller
 
         foreach ($fieldAliases as $alias => $field) {
             if (!$request->has($field) && $request->has($alias)) {
-                $request->merge([$field => $request->input($alias)]);
+                $request->merge([
+                    $field => $request->input($alias)
+                ]);
             }
         }
 
@@ -117,20 +333,10 @@ class AdmissionFormController extends Controller
 
         $validated = $request->validate([
 
-            /*
-             * Selected class.
-             */
             'class_id' => 'required|integer',
 
-
-            /*
-             * Registration ID.
-             */
             'nar_id' => 'required|integer',
 
-            /*
-             * Student details.
-             */
             'first_name' => 'required|string|max:100',
 
             'mid_name' => 'nullable|string|max:100',
@@ -155,9 +361,6 @@ class AdmissionFormController extends Controller
 
             'category' => 'required|string|max:8',
 
-            /*
-             * Address details.
-             */
             'locality' => 'nullable|string|max:50',
 
             'city' => 'nullable|string|max:30',
@@ -168,25 +371,14 @@ class AdmissionFormController extends Controller
 
             'perm_address' => 'nullable|string|max:100',
 
-            /*
-             * Sibling details.
-             *
-             * Database requires sibling.
-             */
             'sibling' => 'nullable|string|max:20',
 
             'sibling_class_id' => 'nullable|string|max:10',
 
             'sibling_student_id' => 'nullable|string|max:100',
 
-            /*
-             * Optional phone number.
-             */
             'sms_sending_phone_no' => 'nullable|string|max:10',
 
-            /*
-             * Optional parent area.
-             */
             'other_area' => 'nullable|string|max:50',
         ]);
 
@@ -202,32 +394,36 @@ class AdmissionFormController extends Controller
         ];
 
         $gender = strtolower(trim($validated['gender']));
-        $sibling = strtolower(trim($validated['sibling'] ?? ''));
 
-        $validated['gender'] = $genderCodes[$gender] ?? strtoupper(substr($gender, 0, 1));
-        $validated['sibling'] = $siblingCodes[$sibling]
-            ?? ($sibling !== '' ? strtoupper(substr($sibling, 0, 1)) : 'N');
+        $sibling = strtolower(
+            trim($validated['sibling'] ?? '')
+        );
 
+        $validated['gender'] =
+            $genderCodes[$gender]
+            ?? strtoupper(substr($gender, 0, 1));
+
+        $validated['sibling'] =
+            $siblingCodes[$sibling]
+            ?? (
+                $sibling !== ''
+                    ? strtoupper(substr($sibling, 0, 1))
+                    : 'N'
+            );
 
         try {
 
             DB::beginTransaction();
 
-
             /*
             |--------------------------------------------------------------------------
             | Find Selected Class
             |--------------------------------------------------------------------------
-            |
-            | class_id comes from the selected class.
-            | We fetch the actual class name from database.
-            |
             */
 
             $class = DB::table('class')
                 ->where('class_id', $validated['class_id'])
                 ->first();
-
 
             if (!$class) {
 
@@ -239,25 +435,19 @@ class AdmissionFormController extends Controller
                 ], 404);
             }
 
-
             /*
-|--------------------------------------------------------------------------
-| Find Admission Form
-|--------------------------------------------------------------------------
-|
-| The selected class determines the active admission form.
-| The academic year is retrieved automatically from the
-| matched admission_forms record.
-|
-*/
-            $admissionForm = AdmissionForm::where(
-        'class_id',
-        $validated['class_id']
-    )
-    ->where('is_active', 'Y')
-    ->orderByDesc('academic_yr')
-    ->first();
+            |--------------------------------------------------------------------------
+            | Find Active Admission Form
+            |--------------------------------------------------------------------------
+            */
 
+            $admissionForm = AdmissionForm::where(
+                'class_id',
+                $validated['class_id']
+            )
+                ->where('is_active', 'Y')
+                ->orderByDesc('academic_yr')
+                ->first();
 
             if (!$admissionForm) {
 
@@ -270,42 +460,35 @@ class AdmissionFormController extends Controller
                 ], 404);
             }
 
-
             /*
             |--------------------------------------------------------------------------
             | Academic Year
             |--------------------------------------------------------------------------
-            |
-            | Take the academic year from the matched database record.
-            |
             */
 
             $academicYear = $admissionForm->academic_yr;
 
-
             /*
             |--------------------------------------------------------------------------
-            | Prepare Academic Year For Form Number
+            | Prepare Short Academic Year
             |--------------------------------------------------------------------------
-            |
-            | Example:
-            |
-            | 2026-2027
-            |
-            | becomes:
-            |
-            | 2026-27
-            |
             */
 
             $shortAcademicYear = $academicYear;
 
-            if (preg_match('/^(\d{4})-(\d{4})$/', $academicYear, $matches)) {
+            if (
+                preg_match(
+                    '/^(\d{4})-(\d{4})$/',
+                    $academicYear,
+                    $matches
+                )
+            ) {
 
                 $shortAcademicYear =
-                    $matches[1] . '-' . substr($matches[2], -2);
+                    $matches[1] .
+                    '-' .
+                    substr($matches[2], -2);
             }
-
 
             /*
             |--------------------------------------------------------------------------
@@ -315,106 +498,81 @@ class AdmissionFormController extends Controller
 
             $className = $class->name;
 
+            $className = strtoupper(
+                trim($className)
+            );
+
+            $className = preg_replace(
+                '/[^A-Z0-9]+/',
+                '-',
+                $className
+            );
+
+            $className = trim(
+                $className,
+                '-'
+            );
 
             /*
             |--------------------------------------------------------------------------
-            | Clean Class Name
+            | Generate Form ID
             |--------------------------------------------------------------------------
-            |
-            | Example:
-            |
-            | "Grade 1"
-            |
-            | becomes:
-            |
-            | "GRADE-1"
-            |
             */
 
-            $className = strtoupper(trim($className));
+            $prefix =
+                $shortAcademicYear .
+                '-' .
+                $className;
 
-            $className = preg_replace('/[^A-Z0-9]+/', '-', $className);
-
-            $className = trim($className, '-');
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Generate Unique Form ID
-            |--------------------------------------------------------------------------
-            |
-            | Example:
-            |
-            | 2026-27-GRADE-1-0001
-            |
-            | 2026-27-GRADE-1-0002
-            |
-            | 2026-27-GRADE-1-0003
-            |
-            */
-
-            $prefix = $shortAcademicYear . '-' . $className;
-
-
-            /*
-             * Get the latest form ID starting with this prefix.
-             */
             $lastStudent = OnlineAdmissionForm::where(
-                    'form_id',
-                    'like',
-                    $prefix . '-%'
-                )
+                'form_id',
+                'like',
+                $prefix . '-%'
+            )
                 ->orderByDesc('adm_form_pk')
                 ->first();
 
-
             $nextNumber = 1;
 
+            if (
+                $lastStudent &&
+                $lastStudent->form_id
+            ) {
 
-            if ($lastStudent && $lastStudent->form_id) {
-
-                /*
-                 * Get the last numeric part.
-                 *
-                 * Example:
-                 *
-                 * 2026-27-GRADE-1-0007
-                 *
-                 * gives:
-                 *
-                 * 7
-                 */
-                $parts = explode('-', $lastStudent->form_id);
+                $parts = explode(
+                    '-',
+                    $lastStudent->form_id
+                );
 
                 $lastNumber = end($parts);
 
                 if (is_numeric($lastNumber)) {
 
-                    $nextNumber = ((int) $lastNumber) + 1;
+                    $nextNumber =
+                        ((int) $lastNumber) + 1;
                 }
             }
 
-
             /*
-             * Four digit sequence.
-             */
+            |--------------------------------------------------------------------------
+            | Four Digit Sequence
+            |--------------------------------------------------------------------------
+            */
+
             $uniqueFormId =
-                $prefix . '-' . str_pad(
+                $prefix .
+                '-' .
+                str_pad(
                     $nextNumber,
                     4,
                     '0',
                     STR_PAD_LEFT
                 );
 
-
             /*
             |--------------------------------------------------------------------------
             | Safety Check
             |--------------------------------------------------------------------------
-            |
-            | Because form_id is UNIQUE in the database,
-            | check again before inserting.
-            |
             */
 
             while (
@@ -427,14 +585,15 @@ class AdmissionFormController extends Controller
                 $nextNumber++;
 
                 $uniqueFormId =
-                    $prefix . '-' . str_pad(
+                    $prefix .
+                    '-' .
+                    str_pad(
                         $nextNumber,
                         4,
                         '0',
                         STR_PAD_LEFT
                     );
             }
-
 
             /*
             |--------------------------------------------------------------------------
@@ -444,89 +603,104 @@ class AdmissionFormController extends Controller
 
             $data = [
 
-                /*
-                 * Automatically generated application form ID.
-                 */
-                'form_id' => $uniqueFormId,
+                'form_id' =>
+                    $uniqueFormId,
 
-                /*
-                 * Academic year from admission_forms.
-                 */
-                'academic_yr' => $academicYear,
+                'academic_yr' =>
+                    $academicYear,
 
-                /*
-                 * Selected class ID.
-                 */
-                'class_id' => $validated['class_id'],
+                'class_id' =>
+                    $validated['class_id'],
 
-
-                /*
-                 * Student details.
-                 */
                 'first_name' =>
-                    strtoupper(trim($validated['first_name'])),
+                    strtoupper(
+                        trim($validated['first_name'])
+                    ),
 
                 'mid_name' =>
                     isset($validated['mid_name'])
-                        ? strtoupper(trim($validated['mid_name']))
+                        ? strtoupper(
+                            trim($validated['mid_name'])
+                        )
                         : '',
 
                 'last_name' =>
                     isset($validated['last_name'])
-                        ? strtoupper(trim($validated['last_name']))
+                        ? strtoupper(
+                            trim($validated['last_name'])
+                        )
                         : '',
 
-                'dob' => $validated['dob'],
+                'dob' =>
+                    $validated['dob'],
 
                 'birth_place' =>
-                    strtoupper(trim($validated['birth_place'])),
+                    strtoupper(
+                        trim($validated['birth_place'])
+                    ),
 
                 'gender' =>
-                    strtoupper(trim($validated['gender'])),
+                    strtoupper(
+                        trim($validated['gender'])
+                    ),
 
                 'religion' =>
                     isset($validated['religion'])
-                        ? strtoupper(trim($validated['religion']))
+                        ? strtoupper(
+                            trim($validated['religion'])
+                        )
                         : '',
 
                 'caste' =>
                     isset($validated['caste'])
-                        ? strtoupper(trim($validated['caste']))
+                        ? strtoupper(
+                            trim($validated['caste'])
+                        )
                         : null,
 
                 'subcaste' =>
                     isset($validated['subcaste'])
-                        ? strtoupper(trim($validated['subcaste']))
+                        ? strtoupper(
+                            trim($validated['subcaste'])
+                        )
                         : null,
 
                 'nationality' =>
                     isset($validated['nationality'])
-                        ? strtoupper(trim($validated['nationality']))
+                        ? strtoupper(
+                            trim($validated['nationality'])
+                        )
                         : null,
 
                 'mother_tongue' =>
-                    strtoupper(trim($validated['mother_tongue'])),
+                    strtoupper(
+                        trim($validated['mother_tongue'])
+                    ),
 
                 'category' =>
-                    strtoupper(trim($validated['category'])),
+                    strtoupper(
+                        trim($validated['category'])
+                    ),
 
-
-                /*
-                 * Address details.
-                 */
                 'locality' =>
                     isset($validated['locality'])
-                        ? strtoupper(trim($validated['locality']))
+                        ? strtoupper(
+                            trim($validated['locality'])
+                        )
                         : '',
 
                 'city' =>
                     isset($validated['city'])
-                        ? strtoupper(trim($validated['city']))
+                        ? strtoupper(
+                            trim($validated['city'])
+                        )
                         : '',
 
                 'state' =>
                     isset($validated['state'])
-                        ? strtoupper(trim($validated['state']))
+                        ? strtoupper(
+                            trim($validated['state'])
+                        )
                         : '',
 
                 'pincode' =>
@@ -534,16 +708,16 @@ class AdmissionFormController extends Controller
 
                 'perm_address' =>
                     isset($validated['perm_address'])
-                        ? strtoupper(trim($validated['perm_address']))
+                        ? strtoupper(
+                            trim($validated['perm_address'])
+                        )
                         : '',
 
-
-                /*
-                 * Sibling details.
-                 */
                 'sibling' =>
                     isset($validated['sibling'])
-                        ? strtoupper(trim($validated['sibling']))
+                        ? strtoupper(
+                            trim($validated['sibling'])
+                        )
                         : 'N',
 
                 'sibling_class_id' =>
@@ -552,47 +726,28 @@ class AdmissionFormController extends Controller
                 'sibling_student_id' =>
                     $validated['sibling_student_id'] ?? null,
 
+                'nar_id' =>
+                    $validated['nar_id'],
 
-                /*
-                 * Registration ID.
-                 */
-                'nar_id' => $validated['nar_id'],
+                'student_id' =>
+                    0,
 
-
-                /*
-                 * New application.
-                 */
-                'student_id' => 0,
-
-
-                /*
-                 * Database requires other_area.
-                 */
                 'other_area' =>
                     isset($validated['other_area'])
-                        ? strtoupper(trim($validated['other_area']))
+                        ? strtoupper(
+                            trim($validated['other_area'])
+                        )
                         : '',
 
-
-                /*
-                 * Database requires sms_sending_phone_no.
-                 */
                 'sms_sending_phone_no' =>
                     $validated['sms_sending_phone_no'] ?? '',
 
+                'application_date' =>
+                    now()->toDateString(),
 
-                /*
-                 * Application date.
-                 */
-                'application_date' => now()->toDateString(),
-
-
-                /*
-                 * Final application status.
-                 */
-                'admission_form_status' => 'Applied',
+                'admission_form_status' =>
+                    'Applied',
             ];
-
 
             /*
             |--------------------------------------------------------------------------
@@ -600,11 +755,10 @@ class AdmissionFormController extends Controller
             |--------------------------------------------------------------------------
             */
 
-            $student = OnlineAdmissionForm::create($data);
-
+            $student =
+                OnlineAdmissionForm::create($data);
 
             DB::commit();
-
 
             /*
             |--------------------------------------------------------------------------
@@ -621,46 +775,24 @@ class AdmissionFormController extends Controller
 
                 'data' => [
 
-                    /*
-                     * Generated application ID.
-                     */
                     'form_id' =>
                         $student->form_id,
 
-                    /*
-                     * Registration ID.
-                     */
                     'nar_id' =>
                         $student->nar_id,
 
-                    /*
-                     * Academic year.
-                     */
                     'academic_yr' =>
                         $student->academic_yr,
 
-                    /*
-                     * Selected class.
-                     */
                     'class_id' =>
                         $student->class_id,
 
-                    /*
-                     * Class name.
-                     */
                     'class_name' =>
                         $class->name,
 
-                    /*
-                     * Database primary key.
-                     */
                     'adm_form_pk' =>
                         $student->adm_form_pk,
 
-
-                    /*
-                     * Student details.
-                     */
                     'first_name' =>
                         $student->first_name,
 
@@ -697,10 +829,6 @@ class AdmissionFormController extends Controller
                     'category' =>
                         $student->category,
 
-
-                    /*
-                     * Address.
-                     */
                     'locality' =>
                         $student->locality,
 
@@ -716,10 +844,6 @@ class AdmissionFormController extends Controller
                     'perm_address' =>
                         $student->perm_address,
 
-
-                    /*
-                     * Sibling.
-                     */
                     'sibling' =>
                         $student->sibling,
 
@@ -729,33 +853,15 @@ class AdmissionFormController extends Controller
                     'sibling_student_id' =>
                         $student->sibling_student_id,
 
-
-                    /*
-                     * Application status.
-                     */
                     'admission_form_status' =>
                         $student->admission_form_status,
                 ]
 
             ], 201);
 
-
         } catch (\Exception $e) {
 
-            /*
-            |--------------------------------------------------------------------------
-            | Rollback
-            |--------------------------------------------------------------------------
-            */
-
             DB::rollBack();
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Database Error
-            |--------------------------------------------------------------------------
-            */
 
             return response()->json([
 
