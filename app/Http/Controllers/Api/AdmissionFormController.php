@@ -3,11 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
 use App\Models\AdmissionForm;
 use App\Models\OnlineAdmissionForm;
 use App\Models\AdmissionDocumentType;
 use App\Models\AdmissionUploadDocument;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class AdmissionFormController extends Controller
@@ -29,261 +29,251 @@ class AdmissionFormController extends Controller
      * - Uploaded status of each document
      * - Document URL when uploaded
      */
-    public function getFormDetails(Request $request, $formId)
-    {
-        $academicYear = $request->query('academic_yr');
+   public function getFormDetails(Request $request, $formId)
+{
+    $academicYear = $request->query('academic_yr');
 
-        if (!$academicYear) {
-            return response()->json([
-                'success' => false,
-                'message' => 'academic_yr is required.'
-            ], 422);
-        }
+    if (!$academicYear) {
+        return response()->json([
+            'success' => false,
+            'message' => 'academic_yr is required.'
+        ], 422);
+    }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Find Admission Form
-        |--------------------------------------------------------------------------
-        */
+    /*
+    |--------------------------------------------------------------------------
+    | Find Admission Form
+    |--------------------------------------------------------------------------
+    */
 
-        $form = AdmissionForm::where('form_id', $formId)
-            ->where('academic_yr', $academicYear)
-            ->where('is_active', 'Y')
-            ->first();
+    $form = AdmissionForm::where('form_id', $formId)
+        ->where('academic_yr', $academicYear)
+        ->where('is_active', 'Y')
+        ->first();
 
-        if (!$form) {
-            return response()->json([
-                'success' => false,
-                'message' =>
-                    'Admission form not found for this form ID and academic year.'
-            ], 404);
-        }
+    if (!$form) {
+        return response()->json([
+            'success' => false,
+            'message' =>
+                'Admission form not found for this form ID and academic year.'
+        ], 404);
+    }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Get All Active Document Types
-        |--------------------------------------------------------------------------
-        |
-        | Documents are completely dynamic.
-        |
-        | No document code is hardcoded here.
-        |
-        */
+    /*
+    |--------------------------------------------------------------------------
+    | Get Active Document Types
+    |--------------------------------------------------------------------------
+    |
+    | Documents are loaded dynamically from:
+    |
+    | admission_document_types
+    |
+    */
 
-        $documentTypes = AdmissionDocumentType::where('is_active', 'Y')
-            ->orderBy('id')
-            ->get();
+    $documentTypes = AdmissionDocumentType::where('is_active', 'Y')
+        ->orderBy('id')
+        ->get();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Check Existing Student Application
-        |--------------------------------------------------------------------------
-        |
-        | If this form_id already exists in online_admission_form,
-        | we check which documents have already been uploaded.
-        |
-        */
+    /*
+    |--------------------------------------------------------------------------
+    | Get Uploaded Documents
+    |--------------------------------------------------------------------------
+    */
 
-        $uploadedDocuments = AdmissionUploadDocument::where(
-            'form_id',
-            $formId
-        )->get();
+    $uploadedDocuments = AdmissionUploadDocument::where(
+        'form_id',
+        $formId
+    )->get();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Create Uploaded Document Lookup
-        |--------------------------------------------------------------------------
-        */
+    /*
+    |--------------------------------------------------------------------------
+    | Create Uploaded Document Lookup
+    |--------------------------------------------------------------------------
+    */
 
-        $uploadedDocumentsByCode = $uploadedDocuments->keyBy(function ($document) {
-            return strtoupper(trim($document->doc_type));
-        });
+    $uploadedDocumentsByCode = $uploadedDocuments->keyBy(function ($document) {
+        return strtoupper(trim($document->doc_type));
+    });
 
-        /*
-        |--------------------------------------------------------------------------
-        | Build Complete Document List
-        |--------------------------------------------------------------------------
-        |
-        | IMPORTANT:
-        |
-        | Every active document type is returned.
-        |
-        | Therefore the frontend will see documents even when
-        | nothing has been uploaded yet.
-        |
-        */
+    /*
+    |--------------------------------------------------------------------------
+    | Build Document List
+    |--------------------------------------------------------------------------
+    */
 
-        $documents = $documentTypes->map(function ($documentType) use (
-            $uploadedDocumentsByCode
-        ) {
+    $documents = $documentTypes->map(function ($documentType) use (
+        $uploadedDocumentsByCode
+    ) {
 
-            $code = strtoupper(trim($documentType->code));
+        $code = strtoupper(trim($documentType->code));
 
-            $uploadedDocument = $uploadedDocumentsByCode->get($code);
+        $uploadedDocument = $uploadedDocumentsByCode->get($code);
 
-            $isUploaded = $uploadedDocument !== null;
+        $uploaded = $uploadedDocument !== null;
 
-            $documentUrl = null;
+        return [
+            'id' => $documentType->id,
+            'code' => $documentType->code,
+            'name' => $documentType->name,
+            'is_required' => $documentType->is_required,
+            'is_active' => $documentType->is_active,
 
-            if ($uploadedDocument) {
-                $documentUrl = asset(
+            // Important for frontend
+            'uploaded' => $uploaded,
+
+            'image_name' => $uploadedDocument
+                ? $uploadedDocument->image_name
+                : null,
+
+            'document_url' => $uploadedDocument
+                ? asset(
                     'storage/admission_documents/' .
                     $uploadedDocument->image_name
-                );
-            }
+                )
+                : null,
+        ];
+    })->values();
 
-            return [
-                'id' => $documentType->id,
+    /*
+    |--------------------------------------------------------------------------
+    | Required Documents
+    |--------------------------------------------------------------------------
+    */
 
-                'code' => $documentType->code,
+    $requiredDocuments = $documents
+        ->where('is_required', 'Y')
+        ->values();
 
-                'name' => $documentType->name,
+    /*
+    |--------------------------------------------------------------------------
+    | Optional Documents
+    |--------------------------------------------------------------------------
+    */
 
-                'is_required' => $documentType->is_required,
+    $optionalDocuments = $documents
+        ->where('is_required', 'N')
+        ->values();
 
-                'is_active' => $documentType->is_active,
+    /*
+    |--------------------------------------------------------------------------
+    | Missing Required Documents
+    |--------------------------------------------------------------------------
+    */
 
-                'uploaded' => $isUploaded,
+    $missingRequiredDocuments = $requiredDocuments
+        ->where('uploaded', false)
+        ->values();
 
-                'image_name' => $uploadedDocument
-                    ? $uploadedDocument->image_name
-                    : null,
+    /*
+    |--------------------------------------------------------------------------
+    | Check Required Documents
+    |--------------------------------------------------------------------------
+    */
 
-                'document_url' => $documentUrl,
-            ];
-        })->values();
+    $allRequiredDocumentsUploaded =
+        $missingRequiredDocuments->isEmpty();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Required Documents
-        |--------------------------------------------------------------------------
-        */
+    /*
+    |--------------------------------------------------------------------------
+    | Final Response
+    |--------------------------------------------------------------------------
+    */
 
-        $requiredDocuments = $documents
-            ->where('is_required', 'Y')
-            ->values();
+    return response()->json([
+        'success' => true,
 
-        /*
-        |--------------------------------------------------------------------------
-        | Optional Documents
-        |--------------------------------------------------------------------------
-        */
+        'data' => [
 
-        $optionalDocuments = $documents
-            ->where('is_required', 'N')
-            ->values();
+            /*
+            |--------------------------------------------------------------------------
+            | Admission Form Details
+            |--------------------------------------------------------------------------
+            */
 
-        /*
-        |--------------------------------------------------------------------------
-        | Missing Required Documents
-        |--------------------------------------------------------------------------
-        */
+            'form_id' => $form->form_id,
 
-        $missingRequiredDocuments = $requiredDocuments
-            ->where('uploaded', false)
-            ->values();
+            'class_id' => $form->class_id,
 
-        /*
-        |--------------------------------------------------------------------------
-        | Check Whether All Required Documents Are Uploaded
-        |--------------------------------------------------------------------------
-        */
+            'academic_yr' => $form->academic_yr,
 
-        $allRequiredDocumentsUploaded =
-            $missingRequiredDocuments->isEmpty();
+            'form_title' => $form->form_title,
 
-        /*
-        |--------------------------------------------------------------------------
-        | Final Response
-        |--------------------------------------------------------------------------
-        */
+            'form_description' => $form->form_description,
 
-        return response()->json([
-            'success' => true,
+            /*
+            |--------------------------------------------------------------------------
+            | Form Configuration
+            |--------------------------------------------------------------------------
+            */
 
-            'data' => [
+            'form_configuration' => [
+                'student_details' =>
+                    $form->student_details_enabled === 'Y',
 
-                /*
-                |--------------------------------------------------------------------------
-                | Admission Form
-                |--------------------------------------------------------------------------
-                */
+                'address_details' =>
+                    $form->address_details_enabled === 'Y',
 
-                'form_id' => $form->form_id,
+                'additional_details' =>
+                    $form->additional_details_enabled === 'Y',
+            ],
 
-                'class_id' => $form->class_id,
+            /*
+            |--------------------------------------------------------------------------
+            | DOCUMENT TYPES
+            |--------------------------------------------------------------------------
+            |
+            | This is the important fix.
+            |
+            | The frontend can use document_types directly.
+            |
+            */
 
-                'academic_yr' => $form->academic_yr,
+            'document_types' => $documents,
 
-                'form_title' => $form->form_title,
+            /*
+            |--------------------------------------------------------------------------
+            | All Documents
+            |--------------------------------------------------------------------------
+            */
 
-                'form_description' => $form->form_description,
+            'documents' => $documents,
 
-                /*
-                |--------------------------------------------------------------------------
-                | Form Configuration
-                |--------------------------------------------------------------------------
-                */
+            /*
+            |--------------------------------------------------------------------------
+            | Required Documents
+            |--------------------------------------------------------------------------
+            */
 
-                'form_configuration' => [
+            'required_documents' => $requiredDocuments,
 
-                    'student_details' =>
-                        $form->student_details_enabled === 'Y',
+            /*
+            |--------------------------------------------------------------------------
+            | Optional Documents
+            |--------------------------------------------------------------------------
+            */
 
-                    'address_details' =>
-                        $form->address_details_enabled === 'Y',
+            'optional_documents' => $optionalDocuments,
 
-                    'additional_details' =>
-                        $form->additional_details_enabled === 'Y',
-                ],
+            /*
+            |--------------------------------------------------------------------------
+            | Missing Required Documents
+            |--------------------------------------------------------------------------
+            */
 
-                /*
-                |--------------------------------------------------------------------------
-                | ALL Documents
-                |--------------------------------------------------------------------------
-                |
-                | This is the important addition.
-                |
-                */
+            'missing_required_documents' =>
+                $missingRequiredDocuments,
 
-                'documents' => $documents,
+            /*
+            |--------------------------------------------------------------------------
+            | Required Document Completion
+            |--------------------------------------------------------------------------
+            */
 
-                /*
-                |--------------------------------------------------------------------------
-                | Required Documents
-                |--------------------------------------------------------------------------
-                */
-
-                'required_documents' => $requiredDocuments,
-
-                /*
-                |--------------------------------------------------------------------------
-                | Optional Documents
-                |--------------------------------------------------------------------------
-                */
-
-                'optional_documents' => $optionalDocuments,
-
-                /*
-                |--------------------------------------------------------------------------
-                | Missing Required Documents
-                |--------------------------------------------------------------------------
-                */
-
-                'missing_required_documents' =>
-                    $missingRequiredDocuments,
-
-                /*
-                |--------------------------------------------------------------------------
-                | Required Document Completion
-                |--------------------------------------------------------------------------
-                */
-
-                'all_required_documents_uploaded' =>
-                    $allRequiredDocumentsUploaded,
-            ]
-        ]);
-    }
+            'all_required_documents_uploaded' =>
+                $allRequiredDocumentsUploaded,
+        ]
+    ]);
+}
 
 
     /**
