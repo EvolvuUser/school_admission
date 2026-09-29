@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\AdmissionPaymentController;
 use App\Http\Controllers\Api\AdmissionDocumentTypeController;
 use App\Http\Controllers\Api\AdmissionEnquiryController;
 use App\Http\Controllers\Api\AdmissionSignatureController;
+use App\Http\Controllers\Api\AdminEnquiryController;
 
 
 Route::get('/admission/registration/check-user', [AdmissionController::class, 'checkExistingUser']);
@@ -142,3 +143,12 @@ Route::get(
     '/admission/signature/{formId}',
     [AdmissionSignatureController::class, 'getSignature']
 );
+
+Route::prefix('admin/admission')->group(function () {
+// Get all enquiries 
+Route::get( '/enquiries', [AdminEnquiryController::class, 'index'] );
+// Get one enquiry 
+Route::get( '/enquiries/{id}', [AdminEnquiryController::class, 'show'] );
+// Update enquiry status 
+Route::put( '/enquiries/{id}/status', [AdminEnquiryController::class, 'updateStatus'] ); 
+});

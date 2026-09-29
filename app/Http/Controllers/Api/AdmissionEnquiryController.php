@@ -14,20 +14,6 @@ class AdmissionEnquiryController extends Controller
      * ============================================================
      * RESOLVE nar_id FROM WHATEVER KEY NAME THE FRONTEND SENT
      * ============================================================
-     *
-     * The frontend has, at different points, sent the logged-in
-     * parent's identifier as any of:
-     *
-     * nar_id
-     * narId
-     * user_id
-     * userId
-     * parent_id
-     * parentId
-     *
-     * Rather than breaking every time the frontend uses a
-     * different key name, we normalize all of these onto
-     * 'nar_id' before validation runs. First matching key wins.
      */
     private function resolveNarId(Request $request): void
     {
@@ -119,14 +105,11 @@ class AdmissionEnquiryController extends Controller
      *
      * POST:
      * /api/admission/enquiries
-     *
-     * nar_id is currently received from the frontend,
-     * same as the current admission form approach.
      */
     public function store(Request $request)
     {
-
         $this->resolveNarId($request);
+
 
         /*
         |--------------------------------------------------------------------------
@@ -681,6 +664,21 @@ class AdmissionEnquiryController extends Controller
 
                 /*
                 |--------------------------------------------------------------------------
+                | Initial Enquiry Status
+                |--------------------------------------------------------------------------
+                |
+                | Every new enquiry starts as:
+                |
+                | new
+                |
+                */
+
+                'status' =>
+                    'new',
+
+
+                /*
+                |--------------------------------------------------------------------------
                 | Student Details
                 |--------------------------------------------------------------------------
                 */
@@ -831,6 +829,15 @@ class AdmissionEnquiryController extends Controller
                 'enquiry_number' =>
                     $enquiry->enquiry_number,
 
+                /*
+                |--------------------------------------------------------------------------
+                | Enquiry Status
+                |--------------------------------------------------------------------------
+                */
+
+                'status' =>
+                    $enquiry->status,
+
 
                 /*
                 | Student
@@ -929,17 +936,11 @@ class AdmissionEnquiryController extends Controller
 
     /**
      * ============================================================
-     * GET ALL ADMISSION ENQUIRIES
+     * GET ALL ADMISSION ENQUIRIES - PARENT
      * ============================================================
      *
      * GET:
      * /api/admission/enquiries?nar_id=2856
-     *
-     * The frontend sends nar_id for now,
-     * matching the existing form implementation.
-     *
-     * Also supports narId for frontend compatibility,
-     * same as the online admission form endpoints.
      *
      * Only enquiries belonging to that nar_id are returned.
      */
@@ -1013,6 +1014,15 @@ class AdmissionEnquiryController extends Controller
 
                     'enquiry_number' =>
                         $enquiry->enquiry_number,
+
+                    /*
+                    |--------------------------------------------------------------------------
+                    | Enquiry Status
+                    |--------------------------------------------------------------------------
+                    */
+
+                    'status' =>
+                        $enquiry->status,
 
 
                     /*
@@ -1132,17 +1142,13 @@ class AdmissionEnquiryController extends Controller
 
     /**
      * ============================================================
-     * GET SINGLE ADMISSION ENQUIRY
+     * GET SINGLE ADMISSION ENQUIRY - PARENT
      * ============================================================
      *
      * GET:
      * /api/admission/enquiries/{id}?nar_id=2856
      *
-     * Also supports narId for frontend compatibility,
-     * same as the online admission form endpoints.
-     *
-     * nar_id is also checked here so a parent can only
-     * access their own enquiry.
+     * Parent can only access their own enquiry.
      */
     public function show(Request $request, $id)
     {
@@ -1239,6 +1245,15 @@ class AdmissionEnquiryController extends Controller
 
                 'enquiry_number' =>
                     $enquiry->enquiry_number,
+
+                /*
+                |--------------------------------------------------------------------------
+                | Enquiry Status
+                |--------------------------------------------------------------------------
+                */
+
+                'status' =>
+                    $enquiry->status,
 
 
                 /*
