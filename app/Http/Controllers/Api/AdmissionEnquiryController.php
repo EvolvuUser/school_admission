@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Admission;
 use App\Models\Enquiry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -108,6 +109,49 @@ class AdmissionEnquiryController extends Controller
      */
     public function store(Request $request)
     {
+        $aliases = [
+            'nar_id' => ['narId', 'user_id', 'userId', 'parent_id', 'parentId'],
+            'first_name' => ['firstName', 'student_first_name', 'studentFirstName'],
+            'middle_name' => ['middleName', 'student_middle_name', 'studentMiddleName'],
+            'last_name' => ['lastName', 'student_last_name', 'studentLastName'],
+            'dob' => ['date_of_birth', 'dateOfBirth', 'birth_date'],
+            'gender' => ['student_gender', 'studentGender'],
+            'class' => ['class_name', 'className'],
+            'father_name' => ['fatherName'],
+            'mother_name' => ['motherName'],
+            'contact_no' => ['contactNo', 'phone_no', 'phone', 'mobile'],
+            'email' => ['email_address', 'emailAddress'],
+        ];
+
+        foreach ($aliases as $field => $alternateKeys) {
+            if ($request->filled($field)) {
+                continue;
+            }
+
+            foreach ($alternateKeys as $alternateKey) {
+                if ($request->filled($alternateKey)) {
+                    $request->merge([
+                        $field => $request->input($alternateKey),
+                    ]);
+                    break;
+                }
+            }
+        }
+
+        if (!$request->filled('class') && $request->filled('class_id')) {
+            $request->merge(['class' => $request->input('class_id')]);
+        }
+
+        if ($request->filled('class') && is_numeric($request->input('class'))) {
+            $class = DB::table('class')
+                ->where('class_id', $request->input('class'))
+                ->first();
+
+            if ($class) {
+                $request->merge(['class' => $class->name]);
+            }
+        }
+
         $this->resolveNarId($request);
 
 
@@ -305,7 +349,7 @@ class AdmissionEnquiryController extends Controller
             */
 
             'nar_id' => [
-                'required',
+                'nullable',
                 'integer'
             ],
 
@@ -469,7 +513,7 @@ class AdmissionEnquiryController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $narId = $validated['nar_id'];
+        $narId = $validated['nar_id'] ?? null;
 
 
         /*
@@ -489,6 +533,36 @@ class AdmissionEnquiryController extends Controller
                 'message' =>
                     'At least one parent name is required.'
             ], 422);
+        }
+
+        if (!$narId) {
+            $email = trim((string) ($validated['email'] ?? ''));
+            $contactNumber = preg_replace('/\D+/', '', $validated['contact_no']);
+            $registration = $email !== ''
+                ? Admission::where('email', $email)->first()
+                : null;
+
+            if (!$registration) {
+                $phoneCandidates = [$contactNumber];
+                if (strlen($contactNumber) === 10) {
+                    $phoneCandidates[] = '91' . $contactNumber;
+                    $phoneCandidates[] = '+91' . $contactNumber;
+                }
+
+                $registration = Admission::whereIn('phone_no', $phoneCandidates)->first();
+            }
+
+            if (!$registration) {
+                $registration = Admission::create([
+                    'parent_name' => $validated['father_name']
+                        ?: $validated['mother_name'],
+                    'email' => $email !== '' ? $email : null,
+                    'phone_no' => $contactNumber,
+                    'date' => now()->toDateString(),
+                ]);
+            }
+
+            $narId = $registration->nar_id;
         }
 
 
@@ -546,10 +620,17 @@ class AdmissionEnquiryController extends Controller
 
         try {
 
-            $dob = Carbon::createFromFormat(
-                'm/d/Y',
-                trim($validated['dob'])
-            )->format('Y-m-d');
+            $dobValue = trim($validated['dob']);
+            $dobFormat = preg_match('/^\d{4}-\d{2}-\d{2}$/', $dobValue)
+                ? 'Y-m-d'
+                : 'm/d/Y';
+            $parsedDob = Carbon::createFromFormat($dobFormat, $dobValue);
+
+            if (!$parsedDob) {
+                throw new \InvalidArgumentException('Invalid date of birth.');
+            }
+
+            $dob = $parsedDob->format('Y-m-d');
 
         } catch (\Exception $e) {
 
@@ -977,12 +1058,9 @@ class AdmissionEnquiryController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $enquiries = Enquiry::where(
-            'nar_id',
-            $narId
-        )
-        ->orderByDesc('id')
-        ->get();
+        $enquiries = Enquiry::where('nar_id', $narId)
+            ->orderByDesc('id')
+            ->get();
 
 
         /*

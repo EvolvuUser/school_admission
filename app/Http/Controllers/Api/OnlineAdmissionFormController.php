@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\AdmissionUploadDocument;
 use App\Models\OnlineAdmissionForm;
+use App\Models\NewAdmissionClass;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\DB;
 
@@ -85,6 +86,11 @@ class OnlineAdmissionFormController extends Controller
                 return $document;
             });
 
+        $formFee = NewAdmissionClass::where('class_id', $student->class_id)
+            ->where('academic_yr', $student->academic_yr)
+            ->where('publish', 'Y')
+            ->value('application_form_fee');
+
         /*
         |--------------------------------------------------------------------------
         | Response
@@ -97,6 +103,8 @@ class OnlineAdmissionFormController extends Controller
             'data' => [
                 'application' => $student,
                 'documents' => $documents,
+                'form_fee' => $formFee,
+                'application_form_fee' => $formFee,
             ],
 
             'form_id' => $student->form_id,

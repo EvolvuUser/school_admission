@@ -55,4 +55,5 @@ class Enquiry extends Model
         'dob' => 'date',
 
     ];
+
 }

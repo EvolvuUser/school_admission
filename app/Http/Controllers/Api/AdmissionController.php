@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Admission;
 use App\Models\AdmissionUser;
+use App\Models\Enquiry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -1981,9 +1982,6 @@ public function getDashboard(Request $request)
     |--------------------------------------------------------------------------
     | Count Admission Forms
     |--------------------------------------------------------------------------
-    |
-    | online_admission_form.nar_id identifies the parent.
-    |
     */
 
     $formsCount = DB::table('online_admission_form')
@@ -1998,23 +1996,17 @@ public function getDashboard(Request $request)
     |--------------------------------------------------------------------------
     */
 
-    $enquiriesCount = DB::table('enquiries')
-        ->where('nar_id', $narId)
-        ->count();
+    $enquiriesCount = Enquiry::where('nar_id', $narId)->count();
 
 
     /*
     |--------------------------------------------------------------------------
-    | Calculate Total Amount Paid
+    | Total Amount Paid
     |--------------------------------------------------------------------------
     |
-    | Only successful payments are counted.
+    | S = Successful payment
     |
-    | online_admfee.status:
-    |
-    | S = Success
-    | F = Failed
-    | A = Payment Attempted
+    | We only count successful payments.
     |
     */
 
@@ -2040,7 +2032,7 @@ public function getDashboard(Request $request)
 
     /*
     |--------------------------------------------------------------------------
-    | Format Total Amount
+    | Format Amount
     |--------------------------------------------------------------------------
     */
 
@@ -2056,57 +2048,79 @@ public function getDashboard(Request $request)
     |--------------------------------------------------------------------------
     | Get Admission Applications
     |--------------------------------------------------------------------------
+    |
+    | IMPORTANT:
+    |
+    | We DO NOT join online_admfee here.
+    |
+    | The reason is that one form can have multiple payment attempts.
+    |
+    | Example:
+    |
+    | A
+    | A
+    | S
+    | A
+    |
+    | A normal LEFT JOIN would create 4 application rows.
+    |
     */
 
     $applications = DB::table('online_admission_form')
-        ->leftJoin(
-            'online_admfee',
-            'online_admission_form.form_id',
-            '=',
-            'online_admfee.form_id'
-        )
         ->where(
-            'online_admission_form.nar_id',
+            'nar_id',
             $narId
         )
         ->select(
-            /*
-            |--------------------------------------------------------------------------
-            | Admission Form
-            |--------------------------------------------------------------------------
-            */
-
-            'online_admission_form.form_id',
-            'online_admission_form.first_name',
-            'online_admission_form.mid_name',
-            'online_admission_form.last_name',
-            'online_admission_form.class_id',
-            'online_admission_form.academic_yr',
-            'online_admission_form.admission_form_status',
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Payment
-            |--------------------------------------------------------------------------
-            |
-            | IMPORTANT:
-            | Payment status comes from online_admfee.
-            |
-            | We do NOT use:
-            | online_admission_form.payment_status
-            |
-            */
-
-            'online_admfee.status as payment_db_status',
-            'online_admfee.OrderId as order_id',
-            'online_admfee.amount as payment_amount',
-            'online_admfee.payment_date'
+            'form_id',
+            'first_name',
+            'mid_name',
+            'last_name',
+            'class_id',
+            'academic_yr',
+            'admission_form_status',
+            'payment_status'
         )
         ->orderByDesc(
-            'online_admission_form.form_id'
+            'form_id'
         )
         ->get();
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get All Payments For These Applications
+    |--------------------------------------------------------------------------
+    */
+
+    $formIds = $applications
+        ->pluck('form_id')
+        ->unique()
+        ->values();
+
+
+    $payments = collect();
+
+
+    if ($formIds->isNotEmpty()) {
+
+        $payments = DB::table('online_admfee')
+            ->whereIn(
+                'form_id',
+                $formIds
+            )
+            ->select(
+                'form_id',
+                'status',
+                'OrderId',
+                'amount',
+                'payment_date'
+            )
+            ->get()
+            ->groupBy(
+                'form_id'
+            );
+    }
 
 
     /*
@@ -2116,27 +2130,97 @@ public function getDashboard(Request $request)
     */
 
     $applications = $applications->map(
-        function ($application) {
+        function ($application) use ($payments, $narId) {
 
             /*
             |--------------------------------------------------------------------------
-            | Payment Status
+            | Get Payments For This Form
+            |--------------------------------------------------------------------------
+            */
+
+            $formPayments =
+                $payments->get(
+                    $application->form_id,
+                    collect()
+                );
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Select The Correct Payment
             |--------------------------------------------------------------------------
             |
-            | Database value    Dashboard value
+            | Priority:
             |
-            | S                 Success
-            | F                 Failed
-            | A                 -
-            | NULL              -
+            | 1. S = Success
+            | 2. F = Failed
+            | 3. A = Attempted
+            |
+            | This means if ANY successful payment exists,
+            | the dashboard will show Success.
             |
             */
 
-            if ($application->payment_db_status === 'S') {
+            $payment = $formPayments
+                ->sortBy(function ($item) {
+
+                    if ($item->status === 'S') {
+                        return 1;
+                    }
+
+                    if ($item->status === 'F') {
+                        return 2;
+                    }
+
+                    if ($item->status === 'A') {
+                        return 3;
+                    }
+
+                    return 4;
+                })
+                ->first();
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Default Payment Values
+            |--------------------------------------------------------------------------
+            */
+
+            $paymentDbStatus =
+                $payment->status ?? null;
+
+            $orderId =
+                $payment->OrderId ?? null;
+
+            $paymentAmount =
+                $payment->amount ?? null;
+
+            $paymentDate =
+                $payment->payment_date ?? null;
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Dashboard Payment Status
+            |--------------------------------------------------------------------------
+            */
+
+            $storedPaymentStatus = strtolower(trim(
+                (string) $application->payment_status
+            ));
+
+            if (
+                $paymentDbStatus === 'S' ||
+                in_array($storedPaymentStatus, ['success', 's'], true)
+            ) {
 
                 $paymentStatus = 'Success';
 
-            } elseif ($application->payment_db_status === 'F') {
+            } elseif (
+                $paymentDbStatus === 'F' ||
+                in_array($storedPaymentStatus, ['failed', 'f'], true)
+            ) {
 
                 $paymentStatus = 'Failed';
 
@@ -2148,15 +2232,12 @@ public function getDashboard(Request $request)
 
             /*
             |--------------------------------------------------------------------------
-            | Check Successful Payment
+            | Download Permission
             |--------------------------------------------------------------------------
-            |
-            | Download is available ONLY when payment status = S.
-            |
             */
 
             $isPaymentSuccessful =
-                $application->payment_db_status === 'S';
+                $paymentStatus === 'Success';
 
 
             /*
@@ -2220,9 +2301,6 @@ public function getDashboard(Request $request)
                 |--------------------------------------------------------------------------
                 | Payment Status
                 |--------------------------------------------------------------------------
-                |
-                | This is the value displayed on the dashboard.
-                |
                 */
 
                 'payment_status' =>
@@ -2231,15 +2309,15 @@ public function getDashboard(Request $request)
 
                 /*
                 |--------------------------------------------------------------------------
-                | Actual Database Payment Status
+                | Actual Database Status
                 |--------------------------------------------------------------------------
                 |
-                | S / F / A / NULL
+                | S / F / A
                 |
                 */
 
                 'payment_db_status' =>
-                    $application->payment_db_status,
+                    $paymentDbStatus,
 
 
                 /*
@@ -2249,13 +2327,13 @@ public function getDashboard(Request $request)
                 */
 
                 'order_id' =>
-                    $application->order_id,
+                    $orderId,
 
                 'payment_amount' =>
-                    $application->payment_amount,
+                    $paymentAmount,
 
                 'payment_date' =>
-                    $application->payment_date,
+                    $paymentDate,
 
 
                 /*
@@ -2266,26 +2344,21 @@ public function getDashboard(Request $request)
 
                 'actions' => [
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | Edit
-                    |--------------------------------------------------------------------------
-                    */
-
                     'can_edit' => true,
 
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | Download Application
-                    |--------------------------------------------------------------------------
-                    |
-                    | Only successful payment can download.
-                    |
-                    */
+                    'can_pay' => !$isPaymentSuccessful,
 
                     'can_download' =>
                         $isPaymentSuccessful,
+
+                    'download_url' => $isPaymentSuccessful
+                        ? url(
+                            '/api/admission/online-form/' .
+                            rawurlencode($application->form_id) .
+                            '/download?nar_id=' .
+                            $narId
+                        )
+                        : null,
                 ],
             ];
         }
@@ -2306,19 +2379,12 @@ public function getDashboard(Request $request)
 
             /*
             |--------------------------------------------------------------------------
-            | Total Admission Forms
+            | Counts
             |--------------------------------------------------------------------------
             */
 
             'forms_count' =>
                 $formsCount,
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Total Enquiries
-            |--------------------------------------------------------------------------
-            */
 
             'enquiries_count' =>
                 $enquiriesCount,
@@ -2336,7 +2402,7 @@ public function getDashboard(Request $request)
 
             /*
             |--------------------------------------------------------------------------
-            | Admission Applications
+            | Applications
             |--------------------------------------------------------------------------
             */
 
