@@ -152,7 +152,13 @@ class AdmissionEnquiryController extends Controller
             'middle_name' => ['middleName', 'student_middle_name', 'studentMiddleName'],
             'last_name' => ['lastName', 'student_last_name', 'studentLastName'],
             'dob' => ['date_of_birth', 'dateOfBirth', 'birth_date'],
-            'gender' => ['student_gender', 'studentGender'],
+            'gender' => [
+                'student_gender',
+                'studentGender',
+                'gender_id',
+                'genderId',
+                'gender_option_id',
+            ],
             'class' => ['class_name', 'className'],
             'father_name' => ['fatherName'],
             'mother_name' => ['motherName'],
@@ -208,26 +214,33 @@ class AdmissionEnquiryController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $genderInput = trim(
-            (string) $request->input('gender')
-        );
+        $genderInput = trim((string) $request->input('gender'));
+
+        if ($genderInput !== '' && ctype_digit($genderInput)) {
+            $genderOption = DB::table('admission_form_field_options')
+                ->where('field_name', 'gender')
+                ->where('is_active', 'Y')
+                ->where('field_option_id', (int) $genderInput)
+                ->value('option_value');
+
+            if ($genderOption !== null) {
+                $genderInput = trim((string) $genderOption);
+            }
+        }
 
         $genderNormalized = strtolower($genderInput);
-
         $genderMap = [
-            'male'   => 'M',
-            'female' => 'F',
-            'other'  => 'O',
+            'male' => 'M',
             'm' => 'M',
+            'female' => 'F',
             'f' => 'F',
+            'other' => 'O',
+            'others' => 'O',
             'o' => 'O',
         ];
 
         if (isset($genderMap[$genderNormalized])) {
-
-            $request->merge([
-                'gender' => $genderMap[$genderNormalized],
-            ]);
+            $request->merge(['gender' => $genderMap[$genderNormalized]]);
         }
 
 
