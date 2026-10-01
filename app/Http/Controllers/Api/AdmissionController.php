@@ -120,10 +120,10 @@ class AdmissionController extends Controller
                     $validated['parent_name'],
 
                 'email' =>
-                    $validated['email'] ?? null,
+                    $validated['email'] ?? ' ',
 
                 'phone_no' =>
-                    $validated['phone_no'] ?? null,
+                    $validated['phone_no'] ?? ' ',
 
                 'date' =>
                     now()->toDateString(),
@@ -357,11 +357,16 @@ class AdmissionController extends Controller
 
         if ($type === 'mobile') {
 
-            $registration =
-                Admission::where(
-                    'phone_no',
-                    $value
-                )->first();
+            $phoneCandidates = [
+                $value,
+                '91' . $value,
+                '+91' . $value,
+            ];
+
+            $registration = Admission::whereIn(
+                'phone_no',
+                $phoneCandidates
+            )->first();
 
         } else {
 
@@ -407,12 +412,12 @@ class AdmissionController extends Controller
                     'email' =>
                         $type === 'email'
                             ? $value
-                            : null,
+                            : ' ',
 
                     'phone_no' =>
                         $type === 'mobile'
                             ? $value
-                            : null,
+                            : ' ',
 
                     'date' =>
                         now()->toDateString(),

@@ -432,7 +432,7 @@ class AdmissionEnquiryController extends Controller
             ],
 
             'last_name' => [
-                'required',
+                'nullable',
                 'string',
                 'max:100'
             ],
@@ -835,9 +835,9 @@ class AdmissionEnquiryController extends Controller
                         : null,
 
                 'last_name' =>
-                    trim(
-                        $validated['last_name']
-                    ),
+                    !empty($validated['last_name'])
+                        ? trim($validated['last_name'])
+                        : null,
 
                 'dob' =>
                     $dob,
