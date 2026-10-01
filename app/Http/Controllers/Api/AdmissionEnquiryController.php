@@ -11,6 +11,31 @@ use Carbon\Carbon;
 
 class AdmissionEnquiryController extends Controller
 {
+    private function availableAcademicYears(): array
+    {
+        $activeYear = DB::table('settings')
+            ->where('active', 'Y')
+            ->value('academic_yr');
+
+        if (!$activeYear) {
+            $activeYear = DB::table('school_settings')
+                ->where('is_active', 'Y')
+                ->value('academic_yr');
+        }
+
+        if (!preg_match('/^(\d{4})-(\d{4})$/', (string) $activeYear, $matches)) {
+            return [];
+        }
+
+        $startYear = (int) $matches[1];
+        $endYear = (int) $matches[2];
+
+        return [
+            sprintf('%04d-%04d', $startYear, $endYear),
+            sprintf('%04d-%04d', $startYear + 1, $endYear + 1),
+        ];
+    }
+
     /**
      * ============================================================
      * RESOLVE nar_id FROM WHATEVER KEY NAME THE FRONTEND SENT
@@ -52,11 +77,23 @@ class AdmissionEnquiryController extends Controller
      */
     public function getClasses()
     {
+        $academicYears = $this->availableAcademicYears();
+
         $classes = DB::table('class')
             ->select(
                 'class_id',
-                'name'
+                'name',
+                'academic_yr'
             )
+            ->whereIn('academic_yr', $academicYears)
+            ->whereExists(function ($query) use ($academicYears) {
+                $query->selectRaw('1')
+                    ->from('new_admission_class')
+                    ->whereColumn('new_admission_class.class_id', 'class.class_id')
+                    ->whereColumn('new_admission_class.academic_yr', 'class.academic_yr')
+                    ->where('new_admission_class.publish', 'Y')
+                    ->whereIn('new_admission_class.academic_yr', $academicYears);
+            })
             ->orderBy('name')
             ->get();
 
@@ -143,8 +180,18 @@ class AdmissionEnquiryController extends Controller
         }
 
         if ($request->filled('class') && is_numeric($request->input('class'))) {
+            $academicYears = $this->availableAcademicYears();
             $class = DB::table('class')
-                ->where('class_id', $request->input('class'))
+                ->where('class.class_id', $request->input('class'))
+                ->whereIn('class.academic_yr', $academicYears)
+                ->whereExists(function ($query) use ($academicYears) {
+                    $query->selectRaw('1')
+                        ->from('new_admission_class')
+                        ->whereColumn('new_admission_class.class_id', 'class.class_id')
+                        ->whereColumn('new_admission_class.academic_yr', 'class.academic_yr')
+                        ->where('new_admission_class.publish', 'Y')
+                        ->whereIn('new_admission_class.academic_yr', $academicYears);
+                })
                 ->first();
 
             if ($class) {
@@ -168,19 +215,18 @@ class AdmissionEnquiryController extends Controller
         $genderNormalized = strtolower($genderInput);
 
         $genderMap = [
-            'male'   => 'Male',
-            'female' => 'Female',
-            'other'  => 'Other',
-
-            'm' => 'Male',
-            'f' => 'Female',
-            'o' => 'Other',
+            'male'   => 'M',
+            'female' => 'F',
+            'other'  => 'O',
+            'm' => 'M',
+            'f' => 'F',
+            'o' => 'O',
         ];
 
         if (isset($genderMap[$genderNormalized])) {
 
             $request->merge([
-                'gender' => $genderMap[$genderNormalized]
+                'gender' => $genderMap[$genderNormalized],
             ]);
         }
 
@@ -386,7 +432,7 @@ class AdmissionEnquiryController extends Controller
             'gender' => [
                 'required',
                 'string',
-                'in:Male,Female,Other'
+                'in:M,F,O'
             ],
 
             /*
@@ -575,11 +621,21 @@ class AdmissionEnquiryController extends Controller
         $className =
             trim($validated['class']);
 
+        $academicYears = $this->availableAcademicYears();
         $class = DB::table('class')
             ->whereRaw(
                 'LOWER(name) = ?',
                 [strtolower($className)]
             )
+            ->whereIn('academic_yr', $academicYears)
+            ->whereExists(function ($query) use ($academicYears) {
+                $query->selectRaw('1')
+                    ->from('new_admission_class')
+                    ->whereColumn('new_admission_class.class_id', 'class.class_id')
+                    ->whereColumn('new_admission_class.academic_yr', 'class.academic_yr')
+                    ->where('new_admission_class.publish', 'Y')
+                    ->whereIn('new_admission_class.academic_yr', $academicYears);
+            })
             ->first();
 
 
@@ -600,16 +656,7 @@ class AdmissionEnquiryController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $genderMapForDatabase = [
-            'Male'   => 'M',
-            'Female' => 'F',
-            'Other'  => 'O',
-        ];
-
-        $gender =
-            $genderMapForDatabase[
-                $validated['gender']
-            ];
+        $gender = $validated['gender'];
 
 
         /*

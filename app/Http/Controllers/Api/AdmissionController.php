@@ -2078,8 +2078,7 @@ public function getDashboard(Request $request)
             'last_name',
             'class_id',
             'academic_yr',
-            'admission_form_status',
-            'payment_status'
+            'admission_form_status'
         )
         ->orderByDesc(
             'form_id'
@@ -2206,21 +2205,11 @@ public function getDashboard(Request $request)
             |--------------------------------------------------------------------------
             */
 
-            $storedPaymentStatus = strtolower(trim(
-                (string) $application->payment_status
-            ));
-
-            if (
-                $paymentDbStatus === 'S' ||
-                in_array($storedPaymentStatus, ['success', 's'], true)
-            ) {
+            if ($paymentDbStatus === 'S') {
 
                 $paymentStatus = 'Success';
 
-            } elseif (
-                $paymentDbStatus === 'F' ||
-                in_array($storedPaymentStatus, ['failed', 'f'], true)
-            ) {
+            } elseif ($paymentDbStatus === 'F') {
 
                 $paymentStatus = 'Failed';
 
