@@ -9,10 +9,15 @@ class AdmissionFormFieldOptionController extends Controller
 {
     public function getOptions()
     {
-        $options = AdmissionFormFieldOption::where('is_active', 'Y')
+        $options = AdmissionFormFieldOption::whereRaw("UPPER(TRIM(is_active)) = 'Y'")
             ->orderBy('field_name')
             ->orderBy('display_order')
-            ->get();
+            ->get()
+            ->unique(function ($option) {
+                return strtolower(trim($option->field_name)) . ':' .
+                    strtolower(trim($option->option_value));
+            })
+            ->values();
 
         $data = [];
 

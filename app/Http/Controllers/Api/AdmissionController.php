@@ -2001,7 +2001,10 @@ public function getDashboard(Request $request)
     |--------------------------------------------------------------------------
     */
 
-    $enquiriesCount = Enquiry::where('nar_id', $narId)->count();
+    $enquiries = Enquiry::where('nar_id', $narId)
+        ->orderByDesc('id')
+        ->get();
+    $enquiriesCount = $enquiries->count();
 
 
     /*
@@ -2382,6 +2385,9 @@ public function getDashboard(Request $request)
 
             'enquiries_count' =>
                 $enquiriesCount,
+
+            'enquiries' =>
+                $enquiries,
 
 
             /*

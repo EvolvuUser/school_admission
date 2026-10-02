@@ -14,12 +14,14 @@ class AdmissionEnquiryController extends Controller
     private function availableAcademicYears(): array
     {
         $activeYear = DB::table('settings')
-            ->where('active', 'Y')
+            ->whereRaw("UPPER(TRIM(active)) = 'Y'")
+            ->orderByDesc('academic_yr')
             ->value('academic_yr');
 
         if (!$activeYear) {
             $activeYear = DB::table('school_settings')
-                ->where('is_active', 'Y')
+                ->whereRaw("UPPER(TRIM(is_active)) = 'Y'")
+                ->orderByDesc('academic_yr')
                 ->value('academic_yr');
         }
 
@@ -30,10 +32,7 @@ class AdmissionEnquiryController extends Controller
         $startYear = (int) $matches[1];
         $endYear = (int) $matches[2];
 
-        return [
-            sprintf('%04d-%04d', $startYear, $endYear),
-            sprintf('%04d-%04d', $startYear + 1, $endYear + 1),
-        ];
+        return [sprintf('%04d-%04d', $startYear, $endYear)];
     }
 
     /**
@@ -118,13 +117,17 @@ class AdmissionEnquiryController extends Controller
     public function getGenders()
     {
         $genders = DB::table('admission_form_field_options')
-            ->where('field_name', 'gender')
-            ->where('is_active', 'Y')
+            ->whereRaw("LOWER(TRIM(field_name)) = 'gender'")
+            ->whereRaw("UPPER(TRIM(is_active)) = 'Y'")
             ->orderBy('display_order')
             ->get([
                 'field_option_id',
                 'option_value'
-            ]);
+            ])
+            ->unique(function ($option) {
+                return strtolower(trim($option->option_value));
+            })
+            ->values();
 
         return response()->json([
             'success' => true,
